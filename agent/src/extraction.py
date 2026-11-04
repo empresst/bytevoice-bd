@@ -46,6 +46,23 @@ class Extraction(BaseModel):
     summary_en: str
     translations: dict[str, str] = Field(default_factory=dict, description="seq -> English")
 
+    @field_validator("intent", mode="before")
+    @classmethod
+    def map_intent(cls, v: object) -> object:
+        s = str(v or "").lower()
+        for key in ("reschedule", "cancel", "book", "enquiry"):
+            if key in s:
+                return key
+        return "enquiry" if "inquir" in s or "info" in s else ("other" if s not in ("book", "reschedule", "cancel", "enquiry", "other") else s)
+
+    @field_validator("outcome", mode="before")
+    @classmethod
+    def map_outcome(cls, v: object) -> object:
+        s = str(v or "").lower().replace(" ", "_").replace("-", "_")
+        aliases = {"inquiry": "enquiry", "follow_up": "follow_up_needed", "callback": "follow_up_needed",
+                   "callback_needed": "follow_up_needed", "book": "booked", "cancel": "cancelled", "reschedule": "rescheduled"}
+        return aliases.get(s, s)
+
     @field_validator("patient_name_en")
     @classmethod
     def latin_name(cls, v: str | None) -> str | None:

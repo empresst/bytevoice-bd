@@ -35,7 +35,7 @@ from pydantic import Field
 load_dotenv(".env.local")
 
 import db  # noqa: E402  (needs env loaded first)
-from bangla import dhaka_words, say_datetime, say_phone, spoken_digits  # noqa: E402
+from bangla import DIGIT_WORDS, dhaka_words, say_datetime, say_phone, spoken_digits  # noqa: E402
 from extraction import extract_and_store  # noqa: E402
 from prompt import build_prompt  # noqa: E402
 from voice import build_llm, build_stt, build_tts  # noqa: E402
@@ -79,13 +79,15 @@ class CallState:
         self.collecting_phone = False
         self.phone_confirmed = False
         self.phone_digits = ""  # parts of the number heard so far
+        self.phone_partials = 0
 
 
 class Receptionist(Agent):
     def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str]) -> None:
         super().__init__(
             instructions=instructions,
-            tools=[EndCallTool(end_instructions="ভদ্রভাবে বিদায় নাও", ignore_on_enter=True)],
+            tools=[EndCallTool(end_instructions=None, ignore_on_enter=True,
+                               extra_description="Say your Bangla goodbye BEFORE calling this; nothing is spoken after it.")],
         )
         self.state = state
         self.doctor_ids = doctor_ids
@@ -175,10 +177,17 @@ class Receptionist(Agent):
                 buf = "0" + buf[3:]
             self.state.phone_digits = buf
             if len(buf) < 11:
-                return {"ok": False, "error": "incomplete", "digits_so_far": len(buf),
-                        "say": "জি", "note": "Number not finished. Say only 'জি' and wait for the rest."}
+                self.state.phone_partials += 1
+                if self.state.phone_partials < 2:
+                    return {"ok": False, "error": "incomplete", "say": "জি",
+                            "note": "Number not finished. Say only 'জি' and wait for the rest."}
+                # Second partial: tell the caller what we heard so they can continue or restart.
+                heard = " ".join(DIGIT_WORDS[int(d)] for d in buf)
+                return {"ok": False, "error": "incomplete",
+                        "say": f"এখন পর্যন্ত পেয়েছি {heard}। বাকিটা বলুন, অথবা পুরো নম্বরটা আবার বলুন।"}
             e164 = await db.normalize_phone(buf)
             self.state.phone_digits = ""
+            self.state.phone_partials = 0
             if not e164:
                 return {"ok": False, "error": "invalid_phone",
                         "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
