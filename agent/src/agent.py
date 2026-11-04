@@ -250,21 +250,34 @@ class Receptionist(Agent):
         async def go() -> dict:
             chunk = spoken_digits(spoken)
             buf = self.state.phone_digits
-            # A part that starts like a mobile number ("01…", "+880…") is a fresh attempt:
-            # never glue it onto earlier pieces.
-            if chunk.startswith(("01", "8801")) or len(chunk) >= 11 or len(buf) + len(chunk) > 11:
-                buf = chunk
-            else:
-                buf += chunk
+            # A part that starts like a mobile number ("01…", "8801…") is a fresh attempt.
+            buf = chunk if chunk.startswith(("01", "8801")) or not buf else buf + chunk
             if buf.startswith("880"):
                 buf = "0" + buf[3:]
+
+            def wrong(say: str) -> dict:
+                self.state.phone_digits = ""
+                self.state.phone_partials = 0
+                self.state.phone_invalid += 1
+                if self.state.phone_invalid >= 3:  # three tries, then offer a callback instead of looping
+                    return {"ok": False, "error": "invalid_phone",
+                            "say": "দুঃখিত, নম্বরটা ঠিকমতো ধরতে পারছি না। আপনি চাইলে আমাদের টিম আপনাকে ফোন করে appointment ঠিক করে দেবে।",
+                            "note": "Offer request_callback; do not ask for the number again."}
+                return {"ok": False, "error": "invalid_phone", "say": say}
+
+            # Bangladeshi mobiles: 01, then 3-9, then 8 digits (11 in total). Catch mistakes as soon as they are heard.
+            if (len(buf) >= 1 and buf[0] != "0") or (len(buf) >= 2 and buf[1] != "1"):
+                return wrong("নম্বরটা ঠিক মনে হচ্ছে না। বাংলাদেশের মোবাইল নম্বর শূন্য এক দিয়ে শুরু হয়। আরেকবার বলবেন?")
+            if len(buf) >= 3 and buf[2] not in "3456789":
+                return wrong("নম্বরটা ঠিক মনে হচ্ছে না। শূন্য এক-এর পরে তিন থেকে নয়ের মধ্যে কোনো অংক হয়। পুরো নম্বরটা আরেকবার বলবেন?")
+            if len(buf) > 11:
+                return wrong("নম্বরে এগারোটার বেশি অংক হয়ে গেছে। পুরো নম্বরটা আরেকবার বলবেন?")
             self.state.phone_digits = buf
             if len(buf) < 11:
                 self.state.phone_partials += 1
                 if self.state.phone_partials != 2:  # read back what we have only once
                     return {"ok": False, "error": "incomplete", "say": "জি",
                             "note": "Number not finished. Say only 'জি' and wait for the rest."}
-                # Second partial: tell the caller what we heard so they can continue or restart.
                 heard = " ".join(DIGIT_WORDS[int(d)] for d in buf)
                 return {"ok": False, "error": "incomplete",
                         "say": f"এখন পর্যন্ত পেয়েছি {heard}। বাকিটা বলুন, অথবা পুরো নম্বরটা আবার বলুন।"}
@@ -272,13 +285,7 @@ class Receptionist(Agent):
             self.state.phone_digits = ""
             self.state.phone_partials = 0
             if not e164:
-                self.state.phone_invalid += 1
-                if self.state.phone_invalid >= 2:  # don't loop: offer a callback instead
-                    return {"ok": False, "error": "invalid_phone",
-                            "say": "দুঃখিত, নম্বরটা ঠিকমতো ধরতে পারছি না। আপনি চাইলে আমাদের টিম আপনাকে ফোন করে appointment ঠিক করে দেবে।",
-                            "note": "Offer request_callback; do not ask for the number again."}
-                return {"ok": False, "error": "invalid_phone",
-                        "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
+                return wrong("নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন?")
             self.state.phone_confirmed = True
             self.phone_mode(False)
             return {"ok": True, "phone_e164": e164, "say_phone": say_phone(e164),
