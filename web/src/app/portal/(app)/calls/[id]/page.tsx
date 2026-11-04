@@ -21,6 +21,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+const isStale = (startedAt: string) => Date.parse(startedAt) < Date.now() - 15 * 60_000;
+
 export default async function CallDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await supabaseServer();
@@ -33,6 +35,11 @@ export default async function CallDetail({ params }: { params: Promise<{ id: str
     supabase.from("callbacks").select("id, category, reason, status").eq("call_id", id),
   ]);
   if (!call) notFound();
+  // An agent that died never marks its call ended; treat long-"live" calls as failed.
+  if (call.status === "live" && isStale(call.started_at)) {
+    call.status = "failed";
+    call.outcome = call.outcome ?? "failed";
+  }
   const patient = call.patients as { id: string; full_name_bn: string | null; full_name_en: string | null; phone_e164: string } | null;
 
   return (

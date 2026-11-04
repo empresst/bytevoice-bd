@@ -17,6 +17,7 @@ from livekit.plugins import azure, cartesia, deepgram, elevenlabs, groq
 from bangla import azure_pronunciation
 
 logger = logging.getLogger("agent.voice")
+DEFAULT_CONN_OPTIONS = APIConnectOptions()
 
 # Words Deepgram should listen out for (doctor names, services, local terms).
 KEYTERMS = [
@@ -74,9 +75,7 @@ class AzureBanglaTTS(tts.TTS):
     def provider(self) -> str:
         return "azure"
 
-    def synthesize(
-        self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions()
-    ) -> ChunkedStream:
+    def synthesize(self, text: str, *, conn_options: APIConnectOptions = DEFAULT_CONN_OPTIONS) -> ChunkedStream:
         return self._inner.synthesize(azure_pronunciation(text), conn_options=conn_options)
 
     async def aclose(self) -> None:

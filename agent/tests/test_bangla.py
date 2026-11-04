@@ -7,7 +7,14 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from bangla import azure_pronunciation, dhaka_words, say_date, say_phone, say_time, spoken_digits  # noqa: E402
+from bangla import (
+    azure_pronunciation,
+    dhaka_words,
+    say_date,
+    say_phone,
+    say_time,
+    spoken_digits,
+)
 
 D = ZoneInfo("Asia/Dhaka")
 

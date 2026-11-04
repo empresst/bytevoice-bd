@@ -54,7 +54,13 @@ async def clinic_profile() -> dict[str, Any]:
     p = await pool()
     clinic = await p.fetchrow("select * from clinics where id = $1", CLINIC_ID)
     doctors = await p.fetch(
-        "select id, full_name_bn, full_name_en, specialty_bn from doctors where clinic_id = $1 and active order by full_name_en",
+        """select d.id, d.full_name_bn, d.full_name_en, d.specialty_bn,
+                  array_agg(s.code order by s.fee_bdt) as services
+           from doctors d
+           left join doctor_services ds on ds.doctor_id = d.id
+           left join services s on s.id = ds.service_id and s.active
+           where d.clinic_id = $1 and d.active
+           group by d.id order by d.full_name_en""",
         CLINIC_ID,
     )
     services = await p.fetch(
@@ -64,7 +70,7 @@ async def clinic_profile() -> dict[str, Any]:
     return {
         "clinic": dict(clinic) | {"info": _json(clinic["info"])},
         # short code (first name) instead of a UUID: fewer tokens, and the model can't garble it
-        "doctors": [dict(d) | {"code": d["full_name_en"].split()[1].lower()} for d in doctors],
+        "doctors": [dict(d) | {"code": d["full_name_en"].split()[1].lower(), "services": [c for c in d["services"] if c]} for d in doctors],
         "services": [dict(s) for s in services],
     }
 

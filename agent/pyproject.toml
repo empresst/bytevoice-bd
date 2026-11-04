@@ -47,6 +47,12 @@ target-version = "py39"
 select = ["E", "F", "W", "I", "N", "B", "A", "C4", "UP", "SIM", "RUF"]
 ignore = ["E501"]  # Line too long (handled by formatter)
 
+[tool.ruff.lint.per-file-ignores]
+# Bangla text legitimately contains Bengali digits (০-৯), which RUF001 mistakes for look-alikes.
+"src/prompt.py" = ["RUF001"]
+"src/bangla.py" = ["RUF001"]
+"tests/*" = ["RUF001"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
