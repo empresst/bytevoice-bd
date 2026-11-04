@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // The portal is per-user and always dynamic, so Cache Components stays off.
   turbopack: {
     rules: {
       "*.css": {
