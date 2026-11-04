@@ -80,6 +80,7 @@ class CallState:
         self.phone_confirmed = False
         self.phone_digits = ""  # parts of the number heard so far
         self.phone_partials = 0
+        self.phone_invalid = 0
 
 
 class Receptionist(Agent):
@@ -182,8 +183,10 @@ class Receptionist(Agent):
         async def go() -> dict:
             chunk = spoken_digits(spoken)
             buf = self.state.phone_digits
-            if len(chunk) >= 11 or (chunk.startswith("01") and len(buf) + len(chunk) > 11) or len(buf) + len(chunk) > 13:
-                buf = chunk                      # a fresh full attempt replaces what we had
+            # A part that starts like a mobile number ("01…", "+880…") is a fresh attempt:
+            # never glue it onto earlier pieces.
+            if chunk.startswith(("01", "8801")) or len(chunk) >= 11 or len(buf) + len(chunk) > 11:
+                buf = chunk
             else:
                 buf += chunk
             if buf.startswith("880"):
@@ -191,7 +194,7 @@ class Receptionist(Agent):
             self.state.phone_digits = buf
             if len(buf) < 11:
                 self.state.phone_partials += 1
-                if self.state.phone_partials < 2:
+                if self.state.phone_partials != 2:  # read back what we have only once
                     return {"ok": False, "error": "incomplete", "say": "জি",
                             "note": "Number not finished. Say only 'জি' and wait for the rest."}
                 # Second partial: tell the caller what we heard so they can continue or restart.
@@ -202,6 +205,11 @@ class Receptionist(Agent):
             self.state.phone_digits = ""
             self.state.phone_partials = 0
             if not e164:
+                self.state.phone_invalid += 1
+                if self.state.phone_invalid >= 2:  # don't loop: offer a callback instead
+                    return {"ok": False, "error": "invalid_phone",
+                            "say": "দুঃখিত, নম্বরটা ঠিকমতো ধরতে পারছি না। আপনি চাইলে আমাদের টিম আপনাকে ফোন করে appointment ঠিক করে দেবে।",
+                            "note": "Offer request_callback; do not ask for the number again."}
                 return {"ok": False, "error": "invalid_phone",
                         "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
             self.state.phone_confirmed = True
