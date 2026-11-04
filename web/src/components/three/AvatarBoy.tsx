@@ -23,7 +23,11 @@ const REST = { upper: 1.2, lower: 0.15 };
 // Wave: forearm raised with the palm turned to the viewer; it sways left-right
 // around the camera axis (applied on top of the pose, so the palm stays facing out).
 const FOREARM_REST = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -REST.lower));
-const FOREARM_WAVE = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 1.4, 1.85));
+// Palm turned to the viewer by twisting along the forearm and wrist (like a real
+// arm), not by bending the elbow sideways, so the elbow skin stays smooth.
+const FOREARM_WAVE = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.78, 0, 1.85, "ZYX"));
+const HAND_WAVE = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.52, 0, 0, "ZYX"));
+const IDENTITY = new THREE.Quaternion();
 const CAMERA_AXIS = new THREE.Vector3(0, 0, 1);
 const swingQ = new THREE.Quaternion();
 const waveQ = new THREE.Quaternion();
@@ -156,7 +160,7 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     swingQ.setFromAxisAngle(CAMERA_AXIS, swing * 0.45);
     waveQ.copy(FOREARM_WAVE).premultiply(swingQ);
     rl.quaternion.copy(FOREARM_REST).slerp(waveQ, w);
-    rh.rotation.z = 0;
+    rh.quaternion.copy(IDENTITY).slerp(HAND_WAVE, w);
     lu.rotation.z = REST.upper - gesture * 0.4;
     ll.rotation.z = REST.lower + gesture;
     ll.rotation.y = -gesture * 1.2;
