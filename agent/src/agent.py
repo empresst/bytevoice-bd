@@ -1,4 +1,4 @@
-"""ByteVoice Bangladesh: Bangla voice receptionist for Nipa Dental Care.
+"""ByteVoice Bangladesh: Bangla voice receptionist for Rakib Dental Care.
 
 Flow of one call:
   browser joins a LiveKit room -> this worker is dispatched -> a `calls` row is
@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
@@ -41,6 +41,15 @@ from prompt import build_prompt  # noqa: E402
 from voice import build_llm, build_stt, build_tts  # noqa: E402
 
 logger = logging.getLogger("agent")
+
+_background: set[asyncio.Task] = set()
+
+
+def fire(coro) -> None:
+    """Run a DB write in the background without blocking the conversation."""
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 logging.basicConfig(level=logging.INFO)
 
 DHAKA = ZoneInfo("Asia/Dhaka")
@@ -50,6 +59,7 @@ PARTS_OF_DAY = {"morning": (0, 12), "afternoon": (12, 17), "evening": (17, 24)}
 
 ServiceCode = Literal["checkup", "scaling", "filling", "root_canal", "extraction",
                       "braces_consult", "whitening", "child_checkup"]
+DoctorCode = Literal["tanvir", "farhana", "nusrat"]
 
 
 class CallState:
@@ -65,16 +75,17 @@ class CallState:
 
 
 class Receptionist(Agent):
-    def __init__(self, instructions: str, state: CallState) -> None:
+    def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str]) -> None:
         super().__init__(
             instructions=instructions,
             tools=[EndCallTool(end_instructions="ভদ্রভাবে বিদায় নাও", ignore_on_enter=True)],
         )
         self.state = state
+        self.doctor_ids = doctor_ids
 
     async def on_enter(self) -> None:
         await self.session.say(
-            "আসসালামু আলাইকুম, নিপা ডেন্টাল কেয়ার থেকে বলছি। আমি নিপা। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?",
+            "আসসালামু আলাইকুম, রাকিব ডেন্টাল কেয়ার থেকে বলছি। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?",
             allow_interruptions=True,
         )
 
@@ -90,7 +101,7 @@ class Receptionist(Agent):
                           "say": "দুঃখিত, সিস্টেমে একটু সমস্যা হচ্ছে। আমি কি আমাদের টিমকে আপনাকে ফোন করতে বলবো?"}, False
             _ = e
         ms = int((time.perf_counter() - t0) * 1000)
-        asyncio.create_task(db.log_tool(self.state.call_id, name, args, result, ok, ms))
+        fire(db.log_tool(self.state.call_id, name, args, result, ok, ms))
         return result
 
     # ------------------------------------------------------------------ tools
@@ -102,9 +113,10 @@ class Receptionist(Agent):
         date_iso: Annotated[str, Field(description="Date as YYYY-MM-DD, resolved from the calendar in your instructions")],
         service_code: ServiceCode,
         part_of_day: Annotated[Literal["any", "morning", "afternoon", "evening"], Field(description="morning=সকাল, afternoon=দুপুর/বিকাল, evening=সন্ধ্যা/রাত")] = "any",
-        doctor_id: Annotated[str | None, Field(description="Only if the caller asked for a specific doctor")] = None,
+        preferred_time: Annotated[str | None, Field(description="HH:MM 24h if the caller named a time, e.g. 16:00 for বিকাল চারটা. Call again whenever they ask for a different time.")] = None,
+        doctor: Annotated[DoctorCode | None, Field(description="ONLY if the caller named a doctor. Otherwise leave empty to search all doctors.")] = None,
     ) -> dict:
-        """Find free appointment times on one day for a service."""
+        """Find free appointment times on one day for a service, across all doctors unless one was requested."""
         async def go() -> dict:
             try:
                 day = date.fromisoformat(date_iso)
@@ -114,22 +126,35 @@ class Receptionist(Agent):
                 return {"ok": False, "error": "date_in_past"}
             if day.weekday() == 4:
                 return {"ok": False, "error": "closed_friday", "say": "শুক্রবার ক্লিনিক বন্ধ থাকে।"}
-            rows = await db.available_slots(day, service_code, doctor_id)
+            rows = await db.available_slots(day, service_code, None)
+            code_of = {v: k for k, v in self.doctor_ids.items()}
             lo, hi = PARTS_OF_DAY.get(part_of_day, (0, 24))
-            rows = [r for r in rows if lo <= r["starts_at"].astimezone(DHAKA).hour < hi]
-            slots = [{"say": say_datetime(r["starts_at"].astimezone(DHAKA)),
-                      "doctor": r["doctor_name_bn"], "doctor_id": str(r["doctor_id"]),
-                      "starts_at": r["starts_at"].isoformat()} for r in rows[:6]]
-            return {"ok": True, "count": len(rows), "slots": slots,
-                    "note": "Offer at most 2-3 of these. Pass starts_at and doctor_id unchanged to book_appointment."}
-        return await self._run("check_availability", {"date": date_iso, "service": service_code,
-                                                      "part_of_day": part_of_day, "doctor_id": doctor_id}, go())
+            local = [(r, r["starts_at"].astimezone(DHAKA)) for r in rows]
+            if part_of_day != "any" and not preferred_time:
+                local = [(r, t) for r, t in local if lo <= t.hour < hi]
+            if preferred_time:
+                try:
+                    hh, mm = map(int, preferred_time.split(":"))
+                    want = hh * 60 + mm
+                    local.sort(key=lambda x: abs(x[1].hour * 60 + x[1].minute - want))
+                except ValueError:
+                    pass
+            if doctor:  # requested doctor first, others after as alternatives
+                local.sort(key=lambda x: code_of.get(str(x[0]["doctor_id"])) != doctor)
+            slots = [{"say": say_datetime(t), "doctor_name": r["doctor_name_bn"],
+                      "doctor": code_of.get(str(r["doctor_id"])), "starts_at": r["starts_at"].isoformat(),
+                      "exact_match": bool(preferred_time) and f"{t:%H:%M}" == preferred_time}
+                     for r, t in local[:5]]
+            return {"ok": True, "count": len(local), "slots": slots,
+                    "note": "Offer 2-3 (exact_match first). Pass starts_at and doctor unchanged to book_appointment."}
+        return await self._run("check_availability", {"date": date_iso, "service": service_code, "part_of_day": part_of_day,
+                                                      "preferred_time": preferred_time, "doctor": doctor}, go())
 
     @function_tool()
     async def confirm_phone(
         self,
         context: RunContext,
-        phone: Annotated[str, Field(description="The mobile number exactly as the caller said it, Bangla or English digits")],
+        phone: Annotated[str, Field(description="The mobile number exactly as the caller said it in THIS call, Bangla or English digits. Never invent or reuse an example number; if the caller has not said it, ask first.")],
     ) -> dict:
         """Validate a Bangladeshi mobile number and get the digit-by-digit read-back."""
         async def go() -> dict:
@@ -148,21 +173,21 @@ class Receptionist(Agent):
         patient_name_en: Annotated[str, Field(description="Same name romanised, e.g. 'Rahim Uddin'")],
         phone: Annotated[str, Field(description="Confirmed mobile number")],
         service_code: ServiceCode,
-        doctor_id: str,
+        doctor: DoctorCode,
         starts_at: Annotated[str, Field(description="starts_at exactly as returned by check_availability")],
         notes: Annotated[str | None, Field(description="Reason or symptoms, short")] = None,
     ) -> dict:
         """Book the appointment. Only call after the caller said yes to the full summary."""
         async def go() -> dict:
             r = await db.book(self.state.call_id, patient_name_bn, patient_name_en, phone, service_code,
-                              doctor_id, datetime.fromisoformat(starts_at), notes)
+                              self.doctor_ids[doctor], datetime.fromisoformat(starts_at), notes)
             if r.get("ok"):
                 self.state.outcome = "booked"
                 r["say"] = say_datetime(datetime.fromisoformat(str(r["starts_at"])).astimezone(DHAKA))
             return r
         return await self._run("book_appointment", {"name_bn": patient_name_bn, "name_en": patient_name_en,
                                                     "phone": phone, "service": service_code,
-                                                    "doctor_id": doctor_id, "starts_at": starts_at}, go())
+                                                    "doctor": doctor, "starts_at": starts_at}, go())
 
     @function_tool()
     async def find_appointments(
@@ -250,7 +275,7 @@ server.setup_fnc = prewarm
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
-    call_id = await db.start_call(ctx.room.name)
+    call_id = await db.start_call(ctx.room.name, ctx.job.id)
     state = CallState(call_id)
     profile = await db.clinic_profile()
     now = datetime.now(DHAKA)
@@ -260,7 +285,15 @@ async def entrypoint(ctx: JobContext) -> None:
         llm=build_llm(),
         tts=build_tts(),
         vad=ctx.proc.userdata["vad"],
-        turn_detection="stt",
+        # Wait for a real pause before answering: Bangla speakers often pause mid-sentence.
+        turn_detection="vad",
+        min_endpointing_delay=0.8,
+        max_endpointing_delay=3.0,
+        # Don't start the LLM before the caller finishes; it doubles requests on Groq's free limits.
+        preemptive_generation=False,
+        # Ignore "hmm"/"জি" while the agent talks; only real interruptions stop it.
+        min_interruption_duration=0.6,
+        min_interruption_words=2,
         user_away_timeout=12,
     )
 
@@ -274,7 +307,7 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         state.seq += 1
         offset = int((time.monotonic() - state.started) * 1000)
-        asyncio.create_task(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",
+        fire(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",
                                         text, offset, bool(getattr(item, "interrupted", False))))
 
     # --- latency: caller stops talking -> agent starts talking
@@ -285,7 +318,7 @@ async def entrypoint(ctx: JobContext) -> None:
         if ev.old_state == "speaking":
             user_stopped[:] = [time.perf_counter()]
         if ev.new_state == "away":
-            asyncio.create_task(handle_silence())
+            fire(handle_silence())
 
     @session.on("agent_state_changed")
     def on_agent_state(ev) -> None:
@@ -327,7 +360,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(finish)
 
-    await session.start(agent=Receptionist(build_prompt(profile, now), state), room=ctx.room)
+    doctor_ids = {d["code"]: str(d["id"]) for d in profile["doctors"]}
+    await session.start(agent=Receptionist(build_prompt(profile, now), state, doctor_ids), room=ctx.room)
 
 
 if __name__ == "__main__":

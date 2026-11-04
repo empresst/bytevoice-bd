@@ -1,10 +1,10 @@
--- Demo clinic: Nipa Dental Care, Dhanmondi. All people and numbers are made up.
+-- Demo clinic: Rakib Dental Care, Dhanmondi. All people and numbers are made up.
 -- Clinic id is fixed so the agent can be configured with CLINIC_ID.
 
 insert into clinics (id, name_bn, name_en, address_bn, address_en, phone_e164, info) values (
   '0b7e5c3a-1d2f-4a6b-9c8d-000000000001',
-  'নিপা ডেন্টাল কেয়ার',
-  'Nipa Dental Care',
+  'রাকিব ডেন্টাল কেয়ার',
+  'Rakib Dental Care',
   'বাড়ি ২৭, রোড ৮/এ, ধানমন্ডি, ঢাকা ১২০৯',
   'House 27, Road 8/A, Dhanmondi, Dhaka 1209',
   '+8801700000000',

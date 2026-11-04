@@ -63,7 +63,8 @@ async def clinic_profile() -> dict[str, Any]:
     )
     return {
         "clinic": dict(clinic) | {"info": _json(clinic["info"])},
-        "doctors": [dict(d) for d in doctors],
+        # short code (first name) instead of a UUID: fewer tokens, and the model can't garble it
+        "doctors": [dict(d) | {"code": d["full_name_en"].split()[1].lower()} for d in doctors],
         "services": [dict(s) for s in services],
     }
 
@@ -119,10 +120,11 @@ async def add_callback(call_id: str, category: str, reason: str, phone: str | No
 
 # --- call records ------------------------------------------------------------
 
-async def start_call(room: str) -> str:
+async def start_call(room: str, job_id: str) -> str:
     p = await pool()
     return str(await p.fetchval(
-        "insert into calls (clinic_id, livekit_room) values ($1, $2) returning id", CLINIC_ID, room,
+        "insert into calls (clinic_id, livekit_room, livekit_job_id) values ($1, $2, $3) returning id",
+        CLINIC_ID, room, job_id,
     ))
 
 

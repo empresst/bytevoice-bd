@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 
-from livekit.agents import APIConnectOptions, llm, tts
+from livekit.agents import APIConnectOptions, inference, llm, tts
 from livekit.agents.tts import ChunkedStream
 from livekit.plugins import azure, cartesia, deepgram, elevenlabs, groq
 
@@ -21,7 +21,7 @@ logger = logging.getLogger("agent.voice")
 # Words Deepgram should listen out for (doctor names, services, local terms).
 KEYTERMS = [
     "appointment", "scaling", "root canal", "filling", "braces", "check-up",
-    "তানভীর", "ফারহানা", "নুসরাত", "নিপা", "ধানমন্ডি", "বিকাশ",
+    "তানভীর", "ফারহানা", "নুসরাত", "রাকিব", "ধানমন্ডি", "বিকাশ",
 ]
 
 
@@ -32,18 +32,22 @@ def build_stt() -> deepgram.STT:
         interim_results=True,
         punctuate=True,
         smart_format=True,
-        endpointing_ms=400,  # Bangla speakers pause mid-sentence; don't cut them off
+        endpointing_ms=300,
         keyterm=KEYTERMS,
     )
 
 
 def build_llm() -> llm.LLM:
-    primary = os.getenv("LLM_MODEL", "moonshotai/kimi-k2-instruct-0905")
-    backup = os.getenv("LLM_FALLBACK_MODEL", "openai/gpt-oss-120b")
-    return llm.FallbackAdapter(
-        [groq.LLM(model=primary, temperature=0.4), groq.LLM(model=backup, temperature=0.4)],
-        attempt_timeout=8.0,
-    )
+    """Gemma 4 on LiveKit Inference first (paid from the LiveKit project's free
+    monthly credit, no per-minute token cap), then Groq's free models if that
+    credit runs out or the call fails."""
+    chain: list[llm.LLM] = [
+        inference.LLM(model=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"),
+                      extra_kwargs={"temperature": 0.3, "max_completion_tokens": 300}),
+        groq.LLM(model="openai/gpt-oss-120b", temperature=0.3, reasoning_effort="low", max_completion_tokens=400),
+        groq.LLM(model="qwen/qwen3.8-27b", temperature=0.3, reasoning_effort="none", max_completion_tokens=400),
+    ]
+    return llm.FallbackAdapter(chain, attempt_timeout=6.0)
 
 
 class AzureBanglaTTS(tts.TTS):
