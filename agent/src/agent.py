@@ -35,7 +35,7 @@ from pydantic import Field
 load_dotenv(".env.local")
 
 import db  # noqa: E402  (needs env loaded first)
-from bangla import dhaka_words, say_datetime, say_phone  # noqa: E402
+from bangla import dhaka_words, say_datetime, say_phone, spoken_digits  # noqa: E402
 from extraction import extract_and_store  # noqa: E402
 from prompt import build_prompt  # noqa: E402
 from voice import build_llm, build_stt, build_tts  # noqa: E402
@@ -78,6 +78,7 @@ class CallState:
         self.end_reason = "caller_hangup"
         self.collecting_phone = False
         self.phone_confirmed = False
+        self.phone_digits = ""  # parts of the number heard so far
 
 
 class Receptionist(Agent):
@@ -160,25 +161,33 @@ class Receptionist(Agent):
     async def confirm_phone(
         self,
         context: RunContext,
-        phone: Annotated[str, Field(description="ALL digits the caller has said for their number in THIS call so far, joined together (callers often say it in 2-3 parts). Never invent or reuse an example number.")],
+        spoken: Annotated[str, Field(description="The caller's latest words for their phone number, copied EXACTLY as they said them (Bangla, English or mixed, e.g. 'জিরো ওয়ান সেভেন', 'শূন্য এক', 'double one'). Do not convert to digits. Never invent a number.")],
     ) -> dict:
-        """Check a Bangladeshi mobile number. If it is only partly said, wait for the rest."""
+        """Collect the caller's mobile number. Call it every time they say part of it; the parts are joined automatically."""
         async def go() -> dict:
-            digits = "".join(ch for ch in phone.translate(BN_TO_ASCII) if ch.isdigit())
-            if digits.startswith("880"):
-                digits = "0" + digits[3:]
-            if len(digits) < 11:
-                return {"ok": False, "error": "incomplete", "digits_so_far": digits,
-                        "say": "জি", "note": "Number not finished. Say only 'জি' and wait; then call again with ALL digits joined."}
-            e164 = await db.normalize_phone(digits)
+            chunk = spoken_digits(spoken)
+            buf = self.state.phone_digits
+            if len(chunk) >= 11 or (chunk.startswith("01") and len(buf) + len(chunk) > 11) or len(buf) + len(chunk) > 13:
+                buf = chunk                      # a fresh full attempt replaces what we had
+            else:
+                buf += chunk
+            if buf.startswith("880"):
+                buf = "0" + buf[3:]
+            self.state.phone_digits = buf
+            if len(buf) < 11:
+                return {"ok": False, "error": "incomplete", "digits_so_far": len(buf),
+                        "say": "জি", "note": "Number not finished. Say only 'জি' and wait for the rest."}
+            e164 = await db.normalize_phone(buf)
+            self.state.phone_digits = ""
             if not e164:
                 return {"ok": False, "error": "invalid_phone",
                         "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
             self.state.collecting_phone = False
             self.state.phone_confirmed = True
             self.session.update_options(min_endpointing_delay=NORMAL_PAUSE[0], max_endpointing_delay=NORMAL_PAUSE[1])
-            return {"ok": True, "phone_e164": e164, "say_phone": say_phone(e164)}
-        return await self._run("confirm_phone", {"phone": phone}, go())
+            return {"ok": True, "phone_e164": e164, "say_phone": say_phone(e164),
+                    "note": "Read say_phone back and ask if it is correct. If the caller says it is wrong, ask again."}
+        return await self._run("confirm_phone", {"spoken": spoken}, go())
 
     @function_tool()
     async def book_appointment(

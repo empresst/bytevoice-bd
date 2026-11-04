@@ -100,3 +100,42 @@ _SARE_RE = re.compile(r"সাড়ে\s+([ঀ-৿]+?)টা")
 
 def azure_pronunciation(text: str) -> str:
     return _SARE_RE.sub(r"\1টা তিরিশে", text)
+
+
+# ---------------------------------------------------------------------------
+# Phone numbers as people actually say them
+# ---------------------------------------------------------------------------
+# Callers mix scripts: "০১৭১২", "zero one seven", "জিরো ওয়ান সেভেন" (English words
+# transcribed in Bangla script), "শূন্য এক সাত", and "double one" / "ডাবল ওয়ান".
+_NUMBER_WORDS = {
+    **{w: "0" for w in ("শূন্য", "শুন্য", "জিরো", "zero", "oh", "o")},
+    **{w: "1" for w in ("এক", "ওয়ান", "ওয়ান", "one")},
+    **{w: "2" for w in ("দুই", "দুই", "দু", "টু", "two")},
+    **{w: "3" for w in ("তিন", "থ্রি", "three")},
+    **{w: "4" for w in ("চার", "ফোর", "four")},
+    **{w: "5" for w in ("পাঁচ", "ফাইভ", "five")},
+    **{w: "6" for w in ("ছয়", "ছয়", "ছ", "সিক্স", "six")},
+    **{w: "7" for w in ("সাত", "সেভেন", "seven")},
+    **{w: "8" for w in ("আট", "এইট", "eight")},
+    **{w: "9" for w in ("নয়", "নয়", "নাইন", "nine")},
+}
+_REPEAT = {"double": 2, "ডাবল": 2, "triple": 3, "ট্রিপল": 3}
+_ASCII = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
+
+def spoken_digits(text: str) -> str:
+    """'zero one eight double one, তিন চার পাঁচ' -> '01811345'."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFC", text).translate(_ASCII).lower()
+    out, repeat = [], 1
+    for tok in re.findall(r"[0-9]+|[a-z]+|[ঀ-৿]+", text):
+        if tok in _REPEAT:
+            repeat = _REPEAT[tok]
+            continue
+        if tok.isdigit():
+            out.append(tok[0] * repeat + tok[1:])
+        elif tok in _NUMBER_WORDS:
+            out.append(_NUMBER_WORDS[tok] * repeat)
+        repeat = 1
+    return "".join(out)
