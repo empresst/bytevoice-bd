@@ -11,171 +11,216 @@ import * as THREE from "three";
  * while the Bangla caller is speaking its beak moves with the agent's real voice level.
  */
 
-export type VoiceState = { level: number; phase: "idle" | "connecting" | "waiting" | "live" | "ended" | "error" };
+export type VoiceState = {
+  level: number;
+  phase: "idle" | "connecting" | "waiting" | "live" | "ended" | "error";
+  /** true while the agent is talking (from LiveKit's agent state) */
+  speaking: boolean;
+};
 
-const BLUE = "#5470d6";
-const BLUE_DARK = "#3c54b4";
-const BELLY = "#dfe6ff";
-const AMBER = "#f5a623";
+const BLUE = "#5b7cf0";
+const BLUE_DARK = "#4562d6";
+const BELLY = "#eef2ff";
+const FACE = "#a9bbff";
+const AMBER = "#ffb02e";
 const NAVY = "#141a33";
+const BLUSH = "#ff8fb1";
+
+const soft = (color: string, extra: Partial<THREE.MeshPhysicalMaterialParameters> = {}) =>
+  ({ color, roughness: 0.38, clearcoat: 0.7, clearcoatRoughness: 0.25, sheen: 0.4, sheenColor: new THREE.Color("#ffffff"), ...extra });
 
 function Bird({ voice }: { voice: React.RefObject<VoiceState> }) {
   const root = useRef<THREE.Group>(null);
   const head = useRef<THREE.Group>(null);
   const lowerBeak = useRef<THREE.Group>(null);
   const eyes = useRef<THREE.Group[]>([]);
-  const pupils = useRef<THREE.Mesh[]>([]);
-  const wings = useRef<THREE.Mesh[]>([]);
+  const pupils = useRef<THREE.Group[]>([]);
+  const wings = useRef<THREE.Group[]>([]);
+  const feet = useRef<THREE.Group[]>([]);
   const micTip = useRef<THREE.MeshStandardMaterial>(null);
-  const smooth = useRef({ level: 0, blink: 0, nextBlink: 2.5 });
+  const st = useRef({ level: 0, open: 0, blink: 0, nextBlink: 2.5, wave: 0, nextWave: 3, wasInCall: false });
 
   useFrame(({ clock, pointer }, dt) => {
     const t = clock.elapsedTime;
-    const s = smooth.current;
+    const s = st.current;
     const v = voice.current;
-    s.level = THREE.MathUtils.lerp(s.level, Math.min(1, (v?.level ?? 0) * 3.5), 0.35);
-    const talking = s.level > 0.04;
+    s.level = THREE.MathUtils.lerp(s.level, Math.min(1, (v?.level ?? 0) * 4), 0.4);
+    const speaking = !!v?.speaking || s.level > 0.05;
+    const inCall = v?.phase === "live";
+
+    // Beak: syllable-like chatter while the agent talks, wider on louder audio.
+    const chatter = speaking ? (0.5 + 0.5 * Math.sin(t * 17)) * (0.55 + 0.45 * Math.abs(Math.sin(t * 5.3))) : 0;
+    const targetOpen = speaking ? 0.12 + chatter * 0.42 + s.level * 0.3 : 0.04;
+    s.open = THREE.MathUtils.lerp(s.open, targetOpen, 0.45);
+    if (lowerBeak.current) lowerBeak.current.rotation.x = s.open;
+
+    // Wave hello every few seconds while idle, and once when a call connects.
+    s.nextWave -= dt;
+    if (inCall !== s.wasInCall) { s.wasInCall = inCall; if (inCall) s.wave = 1; }
+    if (!inCall && s.nextWave <= 0) { s.wave = 1; s.nextWave = 7 + Math.random() * 4; }
+    s.wave = Math.max(0, s.wave - dt * 0.6);
+    const waving = s.wave > 0 ? Math.sin((1 - s.wave) * Math.PI) : 0;
+
+    wings.current.forEach((w, i) => {
+      if (!w) return;
+      const side = i ? -1 : 1; // 0 = left wing (viewer's left), 1 = right wing
+      let rz = side * (0.18 + Math.sin(t * 1.6 + i) * 0.06); // gentle breathing sway
+      if (speaking) rz += side * (0.18 + Math.abs(Math.sin(t * 6 + i * 1.3)) * 0.35); // gesture while talking
+      if (i === 1 && waving) rz = -(0.4 + waving * 1.9 + Math.sin(t * 14) * 0.25 * waving); // right wing waves
+      w.rotation.z = THREE.MathUtils.lerp(w.rotation.z, rz, 0.18);
+    });
+
+    feet.current.forEach((f, i) => {
+      if (!f) return;
+      const step = speaking ? Math.max(0, Math.sin(t * 6 + i * Math.PI)) * 0.35 : Math.max(0, Math.sin(t * 1.2 + i * Math.PI)) * 0.08;
+      f.rotation.x = THREE.MathUtils.lerp(f.rotation.x, -step, 0.25);
+    });
 
     if (head.current) {
-      // Look toward the cursor; tilt the head a little while listening on a call.
-      const listen = v?.phase === "live" && !talking ? 0.12 : 0;
-      head.current.rotation.y = THREE.MathUtils.lerp(head.current.rotation.y, pointer.x * 0.55, 0.06);
-      head.current.rotation.x = THREE.MathUtils.lerp(head.current.rotation.x, -pointer.y * 0.25 + (talking ? Math.sin(t * 9) * 0.03 : 0), 0.08);
-      head.current.rotation.z = THREE.MathUtils.lerp(head.current.rotation.z, listen + Math.sin(t * 0.8) * 0.03, 0.05);
+      head.current.rotation.y = THREE.MathUtils.lerp(head.current.rotation.y, pointer.x * 0.5, 0.06);
+      head.current.rotation.x = THREE.MathUtils.lerp(head.current.rotation.x, -pointer.y * 0.22 + (speaking ? Math.sin(t * 8) * 0.04 : 0), 0.1);
+      const tilt = inCall && !speaking ? 0.14 : waving * 0.12;
+      head.current.rotation.z = THREE.MathUtils.lerp(head.current.rotation.z, tilt + Math.sin(t * 0.8) * 0.03, 0.06);
     }
     if (root.current) {
-      root.current.scale.setScalar(1 + s.level * 0.04);
-      root.current.position.y = talking ? Math.abs(Math.sin(t * 8)) * 0.04 * s.level : 0;
+      root.current.position.y = speaking ? Math.abs(Math.sin(t * 6)) * 0.05 : Math.abs(Math.sin(t * 1.6)) * 0.02;
+      const squash = 1 + (speaking ? Math.sin(t * 12) * 0.012 : 0);
+      root.current.scale.set(1 / squash, squash, 1 / squash);
     }
-    if (lowerBeak.current) lowerBeak.current.rotation.x = THREE.MathUtils.lerp(lowerBeak.current.rotation.x, 0.08 + s.level * 0.55, 0.5);
 
-    // Blink every few seconds.
     s.nextBlink -= dt;
     if (s.nextBlink <= 0) { s.blink = 1; s.nextBlink = 2 + Math.random() * 3; }
     s.blink = Math.max(0, s.blink - dt * 7);
-    const lid = 1 - Math.sin(s.blink * Math.PI) * 0.9;
+    const lid = 1 - Math.sin(s.blink * Math.PI) * 0.92;
     eyes.current.forEach((e) => e && (e.scale.y = lid));
     pupils.current.forEach((p) => {
       if (!p) return;
-      p.position.x = THREE.MathUtils.lerp(p.position.x, pointer.x * 0.06, 0.1);
-      p.position.y = THREE.MathUtils.lerp(p.position.y, pointer.y * 0.05, 0.1);
+      p.position.x = THREE.MathUtils.lerp(p.position.x, pointer.x * 0.07, 0.12);
+      p.position.y = THREE.MathUtils.lerp(p.position.y, pointer.y * 0.06, 0.12);
     });
-    wings.current.forEach((w, i) => w && (w.rotation.z = (i ? -1 : 1) * (0.25 + (talking ? Math.sin(t * 10) * 0.12 * s.level : Math.sin(t * 1.5) * 0.04))));
-    if (micTip.current) micTip.current.emissiveIntensity = 0.4 + s.level * 6 + (v?.phase === "live" ? 0.6 : 0);
+    if (micTip.current) micTip.current.emissiveIntensity = 0.5 + (speaking ? 2 + s.level * 5 : 0) + (inCall ? 0.6 : 0);
   });
-
-  const physical = (color: string, extra: Partial<THREE.MeshPhysicalMaterialParameters> = {}) =>
-    ({ color, roughness: 0.45, clearcoat: 0.6, clearcoatRoughness: 0.35, ...extra });
 
   return (
     <group ref={root}>
-      {/* body */}
-      <mesh castShadow position={[0, -1.05, 0]} scale={[0.95, 0.85, 0.85]}>
+      {/* small round body (chibi proportions: big head, little body) */}
+      <mesh castShadow position={[0, -1.12, 0]} scale={[0.82, 0.74, 0.76]}>
         <sphereGeometry args={[1, 64, 64]} />
-        <meshPhysicalMaterial {...physical(BLUE)} />
+        <meshPhysicalMaterial {...soft(BLUE)} />
       </mesh>
-      <mesh position={[0, -1.1, 0.42]} scale={[0.62, 0.62, 0.5]}>
+      <mesh position={[0, -1.16, 0.4]} scale={[0.56, 0.54, 0.42]}>
         <sphereGeometry args={[1, 48, 48]} />
-        <meshPhysicalMaterial {...physical(BELLY, { clearcoat: 0.2 })} />
+        <meshPhysicalMaterial {...soft(BELLY, { clearcoat: 0.2 })} />
       </mesh>
-      {/* yellow tie, like Byte's suit */}
-      <mesh position={[0, -0.62, 0.8]} rotation={[0.25, 0, Math.PI / 4]} scale={[0.11, 0.11, 0.05]}>
-        <boxGeometry />
-        <meshStandardMaterial color={AMBER} roughness={0.5} />
-      </mesh>
-      <mesh position={[0, -0.86, 0.79]} rotation={[0.2, 0, 0]}>
-        <coneGeometry args={[0.1, 0.38, 4]} />
-        <meshStandardMaterial color={AMBER} roughness={0.5} />
-      </mesh>
-      {/* wings */}
-      {[-1, 1].map((side, i) => (
-        <mesh key={side} ref={(m) => { if (m) wings.current[i] = m; }} position={[side * 0.88, -1.05, 0.05]} scale={[0.22, 0.55, 0.45]} castShadow>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshPhysicalMaterial {...physical(BLUE_DARK)} />
+      {/* little yellow bow tie */}
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={[side * 0.09, -0.62, 0.7]} rotation={[0.3, 0, side * Math.PI / 2]}>
+          <coneGeometry args={[0.08, 0.16, 3]} />
+          <meshStandardMaterial color={AMBER} roughness={0.45} />
         </mesh>
       ))}
-      {/* feet */}
-      {[-0.35, 0.35].map((x) => (
-        <mesh key={x} position={[x, -1.85, 0.35]} scale={[0.22, 0.08, 0.3]}>
-          <sphereGeometry args={[1, 24, 24]} />
-          <meshStandardMaterial color={AMBER} roughness={0.6} />
-        </mesh>
+      <mesh position={[0, -0.62, 0.73]}><sphereGeometry args={[0.045, 16, 16]} /><meshStandardMaterial color="#e89510" /></mesh>
+
+      {/* wings: pivot at the shoulder so they swing like arms */}
+      {[-1, 1].map((side, i) => (
+        <group key={side} ref={(g) => { if (g) wings.current[i] = g; }} position={[side * 0.68, -0.85, 0.05]}>
+          <mesh castShadow position={[side * 0.12, -0.32, 0]} scale={[0.17, 0.4, 0.3]} rotation={[0, 0, side * 0.25]}>
+            <sphereGeometry args={[1, 32, 32]} />
+            <meshPhysicalMaterial {...soft(BLUE_DARK)} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* feet: pivot at the hip so they can tap */}
+      {[-1, 1].map((side, i) => (
+        <group key={side} ref={(g) => { if (g) feet.current[i] = g; }} position={[side * 0.3, -1.72, 0.18]}>
+          <mesh position={[0, -0.06, 0.16]} scale={[0.2, 0.08, 0.27]}>
+            <sphereGeometry args={[1, 24, 24]} />
+            <meshPhysicalMaterial {...soft(AMBER)} />
+          </mesh>
+        </group>
       ))}
 
       {/* head */}
-      <group ref={head} position={[0, 0.25, 0]}>
-        <mesh castShadow>
-          <sphereGeometry args={[1, 64, 64]} />
-          <meshPhysicalMaterial {...physical(BLUE)} />
+      <group ref={head} position={[0, 0.3, 0]}>
+        <mesh castShadow scale={[1.08, 1, 1]}>
+          <sphereGeometry args={[1.05, 64, 64]} />
+          <meshPhysicalMaterial {...soft(BLUE)} />
         </mesh>
-        {/* face patch */}
-        <mesh position={[0, -0.05, 0.55]} scale={[0.75, 0.6, 0.5]}>
+        <mesh position={[0, -0.12, 0.55]} scale={[0.82, 0.66, 0.52]}>
           <sphereGeometry args={[1, 48, 48]} />
-          <meshPhysicalMaterial {...physical("#8fa3f0", { clearcoat: 0.3 })} />
+          <meshPhysicalMaterial {...soft(FACE, { clearcoat: 0.3 })} />
         </mesh>
-        {/* crest */}
-        {[[-0.18, -0.35], [0, 0], [0.18, 0.35]].map(([x, rz], i) => (
-          <mesh key={i} position={[x, 1.05 - Math.abs(x) * 0.6, 0.1]} rotation={[-0.2, 0, rz]}>
-            <coneGeometry args={[0.09, 0.42, 16]} />
-            <meshPhysicalMaterial {...physical(BLUE_DARK)} />
+        {/* fluffy crest */}
+        {[[-0.2, -0.45, 0.32], [0, 0, 0.42], [0.2, 0.45, 0.32]].map(([x, rz, h], i) => (
+          <mesh key={i} position={[x, 1.06 - Math.abs(x) * 0.4, 0.05]} rotation={[-0.25, 0, rz]}>
+            <capsuleGeometry args={[0.07, h, 8, 16]} />
+            <meshPhysicalMaterial {...soft(BLUE_DARK)} />
           </mesh>
         ))}
-        {/* eyes with glasses */}
+        {/* big sparkly eyes behind round glasses */}
         {[-1, 1].map((side, i) => (
-          <group key={side} position={[side * 0.34, 0.2, 0.98]}>
+          <group key={side} position={[side * 0.38, 0.14, 0.98]}>
             <group ref={(g) => { if (g) eyes.current[i] = g; }}>
-              <mesh scale={[1, 1, 0.6]}>
-                <sphereGeometry args={[0.23, 32, 32]} />
-                <meshStandardMaterial color="#ffffff" roughness={0.2} />
+              <mesh scale={[1, 1.08, 0.55]}>
+                <sphereGeometry args={[0.27, 32, 32]} />
+                <meshStandardMaterial color="#ffffff" roughness={0.15} />
               </mesh>
-              <mesh ref={(m) => { if (m) pupils.current[i] = m; }} position={[0, 0, 0.12]}>
-                <sphereGeometry args={[0.11, 24, 24]} />
-                <meshStandardMaterial color={NAVY} roughness={0.15} />
-              </mesh>
-              <mesh position={[0.05, 0.06, 0.2]}>
-                <sphereGeometry args={[0.035, 12, 12]} />
-                <meshBasicMaterial color="#ffffff" />
-              </mesh>
+              <group ref={(g) => { if (g) pupils.current[i] = g; }} position={[0, 0, 0]}>
+                <mesh position={[0, -0.02, 0.11]} scale={[1, 1.1, 0.7]}>
+                  <sphereGeometry args={[0.16, 24, 24]} />
+                  <meshStandardMaterial color={NAVY} roughness={0.1} />
+                </mesh>
+                <mesh position={[0.06, 0.06, 0.24]}><sphereGeometry args={[0.05, 12, 12]} /><meshBasicMaterial color="#ffffff" /></mesh>
+                <mesh position={[-0.05, -0.07, 0.23]}><sphereGeometry args={[0.025, 12, 12]} /><meshBasicMaterial color="#ffffff" /></mesh>
+              </group>
             </group>
-            <mesh position={[0, 0, 0.1]}>
-              <torusGeometry args={[0.28, 0.035, 16, 48]} />
-              <meshStandardMaterial color={NAVY} metalness={0.6} roughness={0.3} />
+            <mesh position={[0, 0, 0.12]}>
+              <torusGeometry args={[0.32, 0.03, 16, 48]} />
+              <meshStandardMaterial color={NAVY} metalness={0.5} roughness={0.3} />
             </mesh>
           </group>
         ))}
-        <mesh position={[0, 0.22, 1.1]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.022, 0.022, 0.16, 8]} />
-          <meshStandardMaterial color={NAVY} metalness={0.6} roughness={0.3} />
+        <mesh position={[0, 0.17, 1.11]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.14, 8]} />
+          <meshStandardMaterial color={NAVY} metalness={0.5} roughness={0.3} />
         </mesh>
-        {/* beak: the lower half opens with the voice */}
-        <mesh position={[0, -0.14, 1.12]} rotation={[Math.PI / 2 - 0.15, 0, 0]}>
-          <coneGeometry args={[0.19, 0.42, 32]} />
-          <meshPhysicalMaterial {...physical(AMBER, { clearcoat: 0.8 })} />
+        {/* rosy cheeks */}
+        {[-1, 1].map((side) => (
+          <mesh key={side} position={[side * 0.62, -0.28, 0.82]} scale={[0.16, 0.1, 0.05]}>
+            <sphereGeometry args={[1, 24, 24]} />
+            <meshStandardMaterial color={BLUSH} transparent opacity={0.55} roughness={0.8} />
+          </mesh>
+        ))}
+        {/* small beak; the lower half opens when Byte talks */}
+        <mesh position={[0, -0.24, 1.08]} rotation={[Math.PI / 2 - 0.2, 0, 0]}>
+          <coneGeometry args={[0.13, 0.26, 32]} />
+          <meshPhysicalMaterial {...soft(AMBER, { clearcoat: 0.9 })} />
         </mesh>
-        <group ref={lowerBeak} position={[0, -0.24, 1.0]}>
-          <mesh position={[0, 0, 0.1]} rotation={[Math.PI / 2 + 0.1, 0, 0]} scale={[1, 1, 0.6]}>
-            <coneGeometry args={[0.15, 0.3, 32]} />
-            <meshPhysicalMaterial {...physical("#e08e10")} />
+        <group ref={lowerBeak} position={[0, -0.31, 1.0]}>
+          <mesh position={[0, -0.01, 0.08]} rotation={[Math.PI / 2 + 0.1, 0, 0]} scale={[1, 1, 0.55]}>
+            <coneGeometry args={[0.11, 0.2, 32]} />
+            <meshPhysicalMaterial {...soft("#f0960f")} />
           </mesh>
         </group>
         {/* headset */}
-        <mesh position={[0, 0.05, 0]}>
-          <torusGeometry args={[1.04, 0.06, 16, 64, Math.PI]} />
-          <meshStandardMaterial color="#1f2540" metalness={0.5} roughness={0.35} />
+        <mesh position={[0, 0.05, 0]} scale={[1.08, 1, 1]}>
+          <torusGeometry args={[1.08, 0.06, 16, 64, Math.PI]} />
+          <meshStandardMaterial color="#232a4a" metalness={0.4} roughness={0.35} />
         </mesh>
         {[-1, 1].map((side) => (
-          <mesh key={side} position={[side * 1.02, 0.05, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <mesh key={side} position={[side * 1.15, 0.05, 0]} rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry args={[0.24, 0.24, 0.2, 32]} />
-            <meshStandardMaterial color="#1f2540" metalness={0.4} roughness={0.4} />
+            <meshStandardMaterial color="#232a4a" metalness={0.3} roughness={0.4} />
           </mesh>
         ))}
-        <mesh position={[-0.7, -0.42, 0.72]} rotation={[0.95, 0.9, 0.55]}>
-          <cylinderGeometry args={[0.025, 0.025, 0.9, 8]} />
-          <meshStandardMaterial color="#1f2540" />
+        <mesh position={[-0.82, -0.42, 0.72]} rotation={[0.95, 0.9, 0.55]}>
+          <cylinderGeometry args={[0.022, 0.022, 0.85, 8]} />
+          <meshStandardMaterial color="#232a4a" />
         </mesh>
-        <mesh position={[-0.38, -0.58, 1.02]}>
-          <sphereGeometry args={[0.075, 16, 16]} />
-          <meshStandardMaterial ref={micTip} color={AMBER} emissive={AMBER} emissiveIntensity={0.4} />
+        <mesh position={[-0.42, -0.62, 1.0]}>
+          <sphereGeometry args={[0.07, 16, 16]} />
+          <meshStandardMaterial ref={micTip} color={AMBER} emissive={AMBER} emissiveIntensity={0.5} />
         </mesh>
       </group>
     </group>
@@ -240,7 +285,7 @@ export default function ByteMascot({ voice }: { voice: React.RefObject<VoiceStat
           <VoiceRings voice={voice} />
         </group>
       </Float>
-      <ContactShadows position={[0, -1.75, 0]} opacity={0.45} scale={6} blur={2.6} far={3} color="#000010" />
+      <ContactShadows position={[0, -1.6, 0]} opacity={0.45} scale={6} blur={2.6} far={3} color="#000010" />
       <Sparkles count={40} scale={[6, 4, 3]} size={2.2} speed={0.3} color="#ffd58a" opacity={0.6} />
     </Canvas>
   );

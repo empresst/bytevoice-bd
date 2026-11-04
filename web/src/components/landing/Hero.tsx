@@ -19,9 +19,10 @@ const ByteMascot = dynamic(() => import("@/components/three/ByteMascot"), {
 export function Hero() {
   const t = useT();
   const { lang } = useLang();
-  const voice = useRef<VoiceState>({ level: 0, phase: "idle" });
+  const voice = useRef<VoiceState>({ level: 0, phase: "idle", speaking: false });
   const onLevel = useCallback((l: number) => { voice.current.level = l; }, []);
-  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") voice.current.level = 0; }, []);
+  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") { voice.current.level = 0; voice.current.speaking = false; } }, []);
+  const onAgentState = useCallback((s: string) => { voice.current.speaking = s === "speaking"; }, []);
   const h = COPY.hero;
 
   return (
@@ -35,16 +36,15 @@ export function Hero() {
           <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-sm text-amber-300">
             <span className="h-2 w-2 rounded-full bg-emerald-400" /> {t(h.badge)}
           </motion.p>
-          <motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="mt-5 text-[2rem] font-bold leading-tight tracking-tight sm:text-5xl xl:text-6xl">
+          <motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="mt-5 text-[2rem] font-bold leading-tight tracking-tight sm:text-5xl xl:text-[3.6rem]">
             {t(h.title1)}
-            <span className="block bg-gradient-to-r from-amber-300 to-amber-500 bg-clip-text text-transparent">{t(h.title2)}</span>
           </motion.h1>
-          <motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }} className="mx-auto mt-5 max-w-xl text-lg text-slate-300 lg:mx-0">
-            {t(h.sub)}
+          <motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }} className="mx-auto mt-5 max-w-xl bg-gradient-to-r from-amber-300 to-amber-500 bg-clip-text text-xl font-semibold leading-snug text-transparent sm:text-2xl lg:mx-0">
+            {t(h.title2)}
           </motion.p>
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }} className="mt-8 flex flex-col items-center gap-3 lg:items-start">
             <p className="text-sm text-slate-400">{t(h.try)}</p>
-            <CallWidget lang={lang} onLevel={onLevel} onPhase={onPhase} />
+            <CallWidget lang={lang} onLevel={onLevel} onPhase={onPhase} onAgentState={onAgentState} />
             <Link href="/portal" className="mt-1 text-sm text-slate-400 underline-offset-4 hover:text-amber-300 hover:underline">{t(h.portalCta)}</Link>
           </motion.div>
         </div>

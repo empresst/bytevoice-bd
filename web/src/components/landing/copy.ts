@@ -10,12 +10,8 @@ export const COPY = {
   },
   hero: {
     badge: { bn: "ByteVoice এখন বাংলাদেশে", en: "ByteVoice is now in Bangladesh" },
-    title1: { bn: "আপনার ক্লিনিকের ফোন", en: "Your clinic's phone," },
-    title2: { bn: "এখন বাংলায়, ২৪ ঘণ্টা।", en: "answered in Bangla, 24/7." },
-    sub: {
-      bn: "Byte আপনার AI রিসেপশনিস্ট। ঢাকার মানুষের মতো স্বাভাবিক বাংলায় কথা বলে, appointment বুক করে, সময় বদলায়, বাতিল করে, আর প্রতিটা কলের সব তথ্য গুছিয়ে রাখে।",
-      en: "Byte is your AI receptionist. It speaks natural, everyday Dhaka Bangla, books, moves and cancels appointments, and keeps every call neatly organised for your staff.",
-    },
+    title1: { bn: "আপনার হাসির যত্নে, আমরা আছি সবসময়।", en: "Caring for your smile, we're always here." },
+    title2: { bn: "আপনার ডেন্টাল ক্লিনিকের AI সহকারী — এখন বাংলায়, ২৪/৭।", en: "Your dental clinic's AI assistant — now in Bangla, 24/7." },
     try: { bn: "এখনই কথা বলে দেখুন: রাকিব ডেন্টাল কেয়ার (ডেমো ক্লিনিক)", en: "Try it now: Rakib Dental Care (demo clinic)" },
     portalCta: { bn: "কল কোথায় জমা হয় দেখুন →", en: "See where calls are stored →" },
     chips: [

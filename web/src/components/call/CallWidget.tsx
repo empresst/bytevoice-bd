@@ -29,6 +29,8 @@ type Props = {
   /** Agent voice level 0..1, ~60 times a second, for the 3D hero. */
   onLevel?: (level: number) => void;
   onPhase?: (phase: CallPhase) => void;
+  /** LiveKit agent state: listening | thinking | speaking … */
+  onAgentState?: (state: string) => void;
   lang?: "bn" | "en";
 };
 
@@ -105,12 +107,13 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
 }
 
 /** Everything that needs the room context: audio playback, captions, voice level. */
-export function CallSurface({ onLevel, lang = "bn" }: Pick<Props, "onLevel" | "lang">) {
+export function CallSurface({ onLevel, onAgentState, lang = "bn" }: Pick<Props, "onLevel" | "onAgentState" | "lang">) {
   const { state, audioTrack } = useVoiceAssistant();
-  const level = useTrackVolume(audioTrack);
+  const level = useTrackVolume(audioTrack, { fftSize: 256, smoothingTimeConstant: 0.2 });
   const transcriptions = useTranscriptions();
 
   useEffect(() => { onLevel?.(level); }, [level, onLevel]);
+  useEffect(() => { onAgentState?.(state); }, [state, onAgentState]);
 
   const last = transcriptions.slice(-2);
   const stateText: Record<string, { bn: string; en: string }> = {
@@ -137,7 +140,7 @@ export function CallSurface({ onLevel, lang = "bn" }: Pick<Props, "onLevel" | "l
   );
 }
 
-export function CallWidget({ onLevel, onPhase, lang = "bn" }: Props) {
+export function CallWidget({ onLevel, onPhase, onAgentState, lang = "bn" }: Props) {
   const { room, phase, error, start, end } = useBanglaCall({ onPhase });
   const busy = phase === "connecting" || phase === "waiting";
   const t = (bn: string, en: string) => (lang === "bn" ? bn : en);
@@ -147,7 +150,7 @@ export function CallWidget({ onLevel, onPhase, lang = "bn" }: Props) {
       <div className="flex flex-col items-center gap-3">
         {phase === "live" ? (
           <>
-            <CallSurface onLevel={onLevel} lang={lang} />
+            <CallSurface onLevel={onLevel} onAgentState={onAgentState} lang={lang} />
             <button onClick={end} className="rounded-full bg-rose-500 px-6 py-3 font-semibold text-white shadow-lg transition hover:bg-rose-400">
               {t("কল শেষ করুন", "End call")}
             </button>
