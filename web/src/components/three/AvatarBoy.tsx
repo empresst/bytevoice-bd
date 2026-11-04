@@ -111,8 +111,8 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
       VOWELS.forEach((k, i) => ease(k, i === s.vowel ? open : 0, 0.5));
       ease("joy", 0.25);
     } else {
-      VOWELS.forEach((k) => ease(k, k === "aa" ? 0.38 : 0, 0.3));
-      ease("joy", 0.6, 0.15);
+      VOWELS.forEach((k) => ease(k, k === "ee" ? 0.45 : 0, 0.3));
+      ease("joy", 0.55, 0.15);
     }
 
     // --- blink
@@ -144,10 +144,10 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     const ru = bone("rightUpperArm"), rl = bone("rightLowerArm"), rh = bone("rightHand");
     const lu = bone("leftUpperArm"), ll = bone("leftLowerArm");
     const gesture = speaking ? Math.max(0, Math.sin(s.t * 2.2)) * 0.18 : 0;
-    const swing = Math.sin(s.t * 10);
-    ru.rotation.z = THREE.MathUtils.lerp(-REST.upper, -0.55 + swing * 0.04, w) + gesture * 0.5;
-    rl.rotation.z = THREE.MathUtils.lerp(-REST.lower, 2.0 + swing * 0.32, w);
-    rh.rotation.z = Math.sin(s.t * 10 + 0.7) * 0.4 * w;
+    const swing = Math.sin(s.t * 8);
+    ru.rotation.z = THREE.MathUtils.lerp(-REST.upper, -0.55, w) + gesture * 0.5;
+    rl.rotation.z = THREE.MathUtils.lerp(-REST.lower, 1.85 + swing * 0.5, w);
+    rh.rotation.z = 0;
     lu.rotation.z = REST.upper - gesture * 0.4;
     ll.rotation.z = REST.lower + gesture;
     ll.rotation.y = -gesture * 1.2;
