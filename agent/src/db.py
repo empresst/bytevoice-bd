@@ -128,11 +128,12 @@ async def start_call(room: str, job_id: str) -> str:
     ))
 
 
-async def add_turn(call_id: str, seq: int, speaker: str, text: str, offset_ms: int, interrupted: bool) -> None:
+async def add_turn(call_id: str, seq: int, speaker: str, text: str, offset_ms: int, interrupted: bool,
+                   response_ms: int | None = None) -> None:
     p = await pool()
     await p.execute(
-        "insert into transcript_turns (call_id, seq, speaker, text_bn, offset_ms, interrupted) values ($1, $2, $3, $4, $5, $6)",
-        call_id, seq, speaker, text, offset_ms, interrupted,
+        "insert into transcript_turns (call_id, seq, speaker, text_bn, offset_ms, interrupted, response_ms) values ($1, $2, $3, $4, $5, $6, $7)",
+        call_id, seq, speaker, text, offset_ms, interrupted, response_ms,
     )
 
 
@@ -145,11 +146,11 @@ async def log_tool(call_id: str, name: str, args: dict, result: Any, ok: bool, d
     )
 
 
-async def end_call(call_id: str, end_reason: str, avg_latency_ms: int | None) -> None:
+async def end_call(call_id: str, end_reason: str, quality: dict) -> None:
     p = await pool()
     await p.execute(
-        "update calls set ended_at = now(), status = 'ended', end_reason = $2, avg_latency_ms = $3 where id = $1",
-        call_id, end_reason, avg_latency_ms,
+        "update calls set ended_at = now(), status = 'ended', end_reason = $2, avg_latency_ms = $3, quality = $4::jsonb where id = $1",
+        call_id, end_reason, quality.get("avg_response_ms"), json.dumps(quality),
     )
 
 

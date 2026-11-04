@@ -7,7 +7,9 @@ import { supabaseServer } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type Turn = { seq: number; speaker: "agent" | "caller" | "system"; text_bn: string; text_en: string | null; offset_ms: number; interrupted: boolean };
+type Turn = { seq: number; speaker: "agent" | "caller" | "system"; text_bn: string; text_en: string | null; offset_ms: number; interrupted: boolean; response_ms: number | null };
+type Quality = { turns?: number; avg_response_ms?: number | null; max_response_ms?: number | null; avg_end_of_turn_ms?: number | null; avg_llm_first_token_ms?: number | null; avg_tts_first_audio_ms?: number | null; interruptions?: number; llm_models?: string[]; tts_providers?: string[] };
+const sec = (ms?: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`);
 type Tool = { id: number; tool_name: string; args: Record<string, unknown>; result: Record<string, unknown>; ok: boolean; duration_ms: number | null; created_at: string };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -25,7 +27,7 @@ export default async function CallDetail({ params }: { params: Promise<{ id: str
   const [{ data: call }, { data: x }, { data: turns }, { data: tools }, { data: appts }, { data: callbacks }] = await Promise.all([
     supabase.from("calls").select("*, patients(id, full_name_bn, full_name_en, phone_e164)").eq("id", id).maybeSingle(),
     supabase.from("call_extractions").select("*").eq("call_id", id).maybeSingle(),
-    supabase.from("transcript_turns").select("seq, speaker, text_bn, text_en, offset_ms, interrupted").eq("call_id", id).order("seq"),
+    supabase.from("transcript_turns").select("seq, speaker, text_bn, text_en, offset_ms, interrupted, response_ms").eq("call_id", id).order("seq"),
     supabase.from("tool_invocations").select("*").eq("call_id", id).order("id"),
     supabase.from("appointment_events").select("event, old_starts_at, new_starts_at, created_at, appointments(id, starts_at, status, doctors(full_name_en), services(name_en))").eq("call_id", id).order("id"),
     supabase.from("callbacks").select("id, category, reason, status").eq("call_id", id),
@@ -82,6 +84,27 @@ export default async function CallDetail({ params }: { params: Promise<{ id: str
             {!x && call.status === "live" && <p className="mt-2 text-sm text-slate-400">Details appear a few seconds after the call ends.</p>}
           </section>
 
+
+          {(() => {
+            const q = (call.quality ?? null) as Quality | null;
+            if (!q || !q.turns) return null;
+            const rows: [string, React.ReactNode][] = [
+              ["Avg response time", <b key="a" className={q.avg_response_ms && q.avg_response_ms > 2000 ? "text-amber-700" : "text-emerald-700"}>{sec(q.avg_response_ms)}</b>],
+              ["Breakdown (avg)", <span key="b" className="text-xs">end-of-speech wait {sec(q.avg_end_of_turn_ms)} · first LLM word {sec(q.avg_llm_first_token_ms)} · first voice sound {sec(q.avg_tts_first_audio_ms)}</span>],
+              ["Slowest turn", sec(q.max_response_ms)],
+              ["Turns measured", q.turns],
+              ["Interruptions handled", q.interruptions ?? 0],
+              ["LLM used", (q.llm_models ?? []).join(", ") || "—"],
+              ["Voice used", (q.tts_providers ?? []).join(", ") || "—"],
+            ];
+            return (
+              <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                <h2 className="font-semibold">Call quality</h2>
+                <p className="text-xs text-slate-400">Measured by LiveKit during the call: caller stops speaking → agent starts speaking.</p>
+                <dl className="mt-3 divide-y divide-slate-100">{rows.map(([k, v]) => <Field key={k} label={k}>{v}</Field>)}</dl>
+              </section>
+            );
+          })()}
           <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <h2 className="font-semibold">Appointments changed in this call</h2>
             <ul className="mt-3 space-y-2 text-sm">
@@ -139,7 +162,7 @@ export default async function CallDetail({ params }: { params: Promise<{ id: str
               <li key={t.seq} className={`flex gap-3 ${t.speaker === "caller" ? "flex-row-reverse text-right" : ""}`}>
                 <span className={`mt-1 h-8 w-8 shrink-0 rounded-full text-center text-xs font-bold leading-8 ${t.speaker === "agent" ? "bg-slate-900 text-amber-300" : "bg-amber-100 text-amber-900"}`}>{t.speaker === "agent" ? "AI" : "C"}</span>
                 <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${t.speaker === "agent" ? "bg-slate-100" : "bg-amber-50"}`}>
-                  <p className="text-[11px] text-slate-500">{t.speaker === "agent" ? "Receptionist (AI)" : "Caller"} · {fmtOffset(t.offset_ms)}{t.interrupted && " · interrupted"}</p>
+                  <p className="text-[11px] text-slate-500">{t.speaker === "agent" ? "Receptionist (AI)" : "Caller"} · {fmtOffset(t.offset_ms)}{t.speaker === "agent" && t.response_ms != null && <span className={t.response_ms > 2500 ? " text-amber-700" : " text-emerald-700"}> · replied in {sec(t.response_ms)}</span>}{t.interrupted && " · interrupted by caller"}</p>
                   <p className="font-[family-name:var(--font-bangla)] text-[15px] leading-relaxed">{t.text_bn}</p>
                   {t.text_en && <p className="mt-1 text-sm italic text-slate-500">{t.text_en}</p>}
                 </div>

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import os
 import time
 from datetime import date, datetime
@@ -66,6 +67,58 @@ ServiceCode = Literal["checkup", "scaling", "filling", "root_canal", "extraction
 DoctorCode = Literal["tanvir", "farhana", "nusrat"]
 
 
+class CallQuality:
+    """Turn-by-turn timings from LiveKit's per-message metrics, summarised per call."""
+
+    def __init__(self) -> None:
+        self.last_user_stop: float | None = None
+        self.response, self.eot, self.ttft, self.ttfb = [], [], [], []
+        self.interruptions = 0
+        self.llm_models: set[str] = set()
+        self.tts_providers: set[str] = set()
+
+    def record(self, role: str, m: dict, interrupted: bool) -> int | None:
+        if role == "user":
+            self.last_user_stop = m.get("stopped_speaking_at") or self.last_user_stop
+            if m.get("end_of_turn_delay"):
+                self.eot.append(m["end_of_turn_delay"])
+            return None
+        if interrupted:
+            self.interruptions += 1
+        if m.get("llm_node_ttft"):
+            self.ttft.append(m["llm_node_ttft"])
+        if m.get("tts_node_ttfb"):
+            self.ttfb.append(m["tts_node_ttfb"])
+        for key, bucket in (("llm_metadata", self.llm_models), ("tts_metadata", self.tts_providers)):
+            meta = m.get(key) or {}
+            name = (meta.get("model_name") if isinstance(meta, dict) else getattr(meta, "model_name", None)) \
+                or (meta.get("model_provider") if isinstance(meta, dict) else getattr(meta, "model_provider", None))
+            if name:
+                bucket.add(str(name))
+        started, stopped = m.get("started_speaking_at"), self.last_user_stop
+        self.last_user_stop = None  # one response per caller turn
+        if started and stopped and 0 < started - stopped < 20:
+            ms = int((started - stopped) * 1000)
+            self.response.append(ms)
+            logger.info("LATENCY caller-stopped -> agent-speaking: %d ms", ms)
+            return ms
+        return None
+
+    def summary(self) -> dict:
+        avg = lambda xs: int(sum(xs) / len(xs) * (1 if xs is self.response else 1000)) if xs else None  # noqa: E731
+        return {
+            "turns": len(self.response),
+            "avg_response_ms": avg(self.response),
+            "max_response_ms": max(self.response) if self.response else None,
+            "avg_end_of_turn_ms": avg(self.eot),
+            "avg_llm_first_token_ms": avg(self.ttft),
+            "avg_tts_first_audio_ms": avg(self.ttfb),
+            "interruptions": self.interruptions,
+            "llm_models": sorted(self.llm_models),
+            "tts_providers": sorted(self.tts_providers),
+        }
+
+
 class CallState:
     """Per-call bookkeeping shared by the tools and the session hooks."""
 
@@ -74,7 +127,7 @@ class CallState:
         self.started = time.monotonic()
         self.seq = 0
         self.outcome: str | None = None  # set only when a booking tool really succeeded
-        self.latencies: list[float] = []
+        self.quality = CallQuality()
         self.end_reason = "caller_hangup"
         self.collecting_phone = False
         self.phone_confirmed = False
@@ -92,6 +145,7 @@ class Receptionist(Agent):
         )
         self.state = state
         self.doctor_ids = doctor_ids
+        self.last_spoke = 0.0
 
     def phone_mode(self, on: bool) -> None:
         """While collecting the number: English speech recognition (digits come out
@@ -111,6 +165,18 @@ class Receptionist(Agent):
             "আসসালামু আলাইকুম, রাকিব ডেন্টাল কেয়ার থেকে বলছি। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?",
             allow_interruptions=True,
         )
+
+    def _ack(self, kind: str) -> None:
+        """Say a short "one moment" right away so the wait for the database and the
+        second LLM step doesn't feel like silence. Not added to the chat history."""
+        phrases = {
+            "check": ["জি, একটু দেখছি।", "এক সেকেন্ড, দেখে নিচ্ছি।", "জি, দেখছি।"],
+            "book": ["জি, বুক করছি।", "এক সেকেন্ড, করে দিচ্ছি।"],
+            "find": ["জি, খুঁজে দেখছি।", "এক সেকেন্ড, দেখছি।"],
+        }[kind]
+        if time.monotonic() - self.last_spoke < 3:
+            return  # the model already said something like "দেখছি" this turn
+        self.session.say(random.choice(phrases), add_to_chat_ctx=False, allow_interruptions=True)
 
     async def _run(self, name: str, args: dict, coro) -> dict:
         """Run a tool, log it to tool_invocations, never raise into the LLM."""
@@ -140,6 +206,7 @@ class Receptionist(Agent):
         doctor: Annotated[DoctorCode | None, Field(description="ONLY if the caller named a doctor. Otherwise leave empty to search all doctors.")] = None,
     ) -> dict:
         """Find free appointment times on one day for a service, across all doctors unless one was requested."""
+        self._ack("check")
         async def go() -> dict:
             try:
                 day = date.fromisoformat(date_iso)
@@ -231,6 +298,7 @@ class Receptionist(Agent):
         notes: Annotated[str | None, Field(description="Reason or symptoms, short")] = None,
     ) -> dict:
         """Book the appointment. Only call after the caller said yes to the full summary."""
+        self._ack("book")
         async def go() -> dict:
             r = await db.book(self.state.call_id, patient_name_bn, patient_name_en, phone, service_code,
                               self.doctor_ids[doctor], datetime.fromisoformat(starts_at), notes)
@@ -249,6 +317,7 @@ class Receptionist(Agent):
         phone: Annotated[str, Field(description="Mobile number the appointment was booked with")],
     ) -> dict:
         """Look up the caller's upcoming appointments by phone number."""
+        self._ack("find")
         async def go() -> dict:
             appts = await db.find_appointments(phone)
             for a in appts:
@@ -265,6 +334,7 @@ class Receptionist(Agent):
         new_starts_at: Annotated[str, Field(description="starts_at from check_availability for the SAME doctor and service")],
     ) -> dict:
         """Move an existing appointment to a new time. Confirm with the caller first."""
+        self._ack("book")
         async def go() -> dict:
             r = await db.reschedule(appointment_id, phone, datetime.fromisoformat(new_starts_at), self.state.call_id)
             if r.get("ok"):
@@ -283,6 +353,7 @@ class Receptionist(Agent):
         reason: str | None = None,
     ) -> dict:
         """Cancel an appointment. Confirm with the caller first."""
+        self._ack("book")
         async def go() -> dict:
             r = await db.cancel(appointment_id, phone, self.state.call_id, reason)
             if r.get("ok"):
@@ -312,6 +383,7 @@ class Receptionist(Agent):
         async def fixed():
             said = ""
             async for chunk in text:
+                self.last_spoke = time.monotonic()
                 said += chunk
                 if "নম্বর" in said and not self.state.phone_confirmed:
                     self.phone_mode(True)
@@ -346,8 +418,8 @@ async def entrypoint(ctx: JobContext) -> None:
         turn_detection="vad",
         min_endpointing_delay=NORMAL_PAUSE[0],
         max_endpointing_delay=NORMAL_PAUSE[1],
-        # Don't start the LLM before the caller finishes; it doubles requests on Groq's free limits.
-        preemptive_generation=False,
+        # Start drafting the reply while we confirm the caller has finished (discarded if they keep talking).
+        preemptive_generation=True,
         # Ignore "hmm"/"জি" while the agent talks; only real interruptions stop it.
         min_interruption_duration=0.6,
         min_interruption_words=2,
@@ -362,27 +434,18 @@ async def entrypoint(ctx: JobContext) -> None:
         text = (getattr(item, "text_content", None) or "").strip()
         if role not in ("user", "assistant") or not text:
             return
+        m = getattr(item, "metrics", None) or {}
+        interrupted = bool(getattr(item, "interrupted", False))
+        response_ms = state.quality.record(role, m, interrupted)
         state.seq += 1
         offset = int((time.monotonic() - state.started) * 1000)
         fire(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",
-                                        text, offset, bool(getattr(item, "interrupted", False))))
-
-    # --- latency: caller stops talking -> agent starts talking
-    user_stopped: list[float] = []
+                         text, offset, interrupted, response_ms))
 
     @session.on("user_state_changed")
     def on_user_state(ev) -> None:
-        if ev.old_state == "speaking":
-            user_stopped[:] = [time.perf_counter()]
         if ev.new_state == "away":
             fire(handle_silence())
-
-    @session.on("agent_state_changed")
-    def on_agent_state(ev) -> None:
-        if ev.new_state == "speaking" and user_stopped:
-            ms = (time.perf_counter() - user_stopped.pop()) * 1000
-            state.latencies.append(ms)
-            logger.info("LATENCY user-stopped -> agent-speaking: %.0f ms", ms)
 
     silence_prompts = 0
 
@@ -406,10 +469,10 @@ async def entrypoint(ctx: JobContext) -> None:
 
     async def finish() -> None:
         cap.cancel()
-        avg = int(sum(state.latencies) / len(state.latencies)) if state.latencies else None
+        q = state.quality.summary()
         try:
             await asyncio.sleep(0.5)  # let the last transcript writes land
-            await db.end_call(call_id, state.end_reason, avg)
+            await db.end_call(call_id, state.end_reason, q)
             await extract_and_store(call_id, state.outcome, now)
         except Exception:
             logger.exception("post-call processing failed")

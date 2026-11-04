@@ -15,13 +15,14 @@ export default async function Dashboard() {
     supabase.from("call_list").select("id, started_at, duration_s, status, outcome, caller_name_bn, caller_name_en, caller_phone, reason_for_visit").gte("started_at", since).order("started_at", { ascending: false }),
     supabase.from("appointments").select("id, starts_at, status, patients(full_name_bn, full_name_en), doctors(full_name_en), services(name_en)").eq("status", "scheduled").gte("starts_at", new Date().toISOString()).order("starts_at").limit(6),
     supabase.from("callbacks").select("id", { count: "exact", head: true }).eq("status", "open"),
-    supabase.from("calls").select("avg_latency_ms").gte("started_at", since).not("avg_latency_ms", "is", null),
+    supabase.from("calls").select("avg_latency_ms, quality").gte("started_at", since).not("avg_latency_ms", "is", null),
   ]);
   const rows = (calls ?? []) as CallRow[];
   const byOutcome = rows.reduce<Record<string, number>>((m, c) => ((m[c.outcome ?? "incomplete"] = (m[c.outcome ?? "incomplete"] ?? 0) + 1), m), {});
   const booked = (byOutcome.booked ?? 0) + (byOutcome.rescheduled ?? 0);
   const durations = rows.map((r) => r.duration_s).filter((d): d is number => d != null);
   const lat = (latency ?? []).map((l) => l.avg_latency_ms as number);
+  const interruptions = (latency ?? []).reduce((n, l) => n + (((l.quality as { interruptions?: number } | null)?.interruptions) ?? 0), 0);
   const max = Math.max(1, ...Object.values(byOutcome));
 
   const stats = [
@@ -30,6 +31,7 @@ export default async function Dashboard() {
     { label: "Open callbacks", value: openCallbacks ?? 0, href: "/portal/callbacks" },
     { label: "Avg call length", value: fmtDuration(durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null) },
     { label: "Avg response time", value: lat.length ? `${(lat.reduce((a, b) => a + b, 0) / lat.length / 1000).toFixed(1)}s` : "—", sub: "caller stops → agent speaks" },
+    { label: "Interruptions handled", value: interruptions, sub: "caller spoke over the agent" },
   ];
 
   return (
@@ -42,7 +44,7 @@ export default async function Dashboard() {
         <LiveRefresh />
       </header>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {stats.map((s) => {
           const body = (
             <>
