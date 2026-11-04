@@ -146,7 +146,8 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     const gesture = speaking ? Math.max(0, Math.sin(s.t * 2.2)) * 0.18 : 0;
     const swing = Math.sin(s.t * 8);
     ru.rotation.z = THREE.MathUtils.lerp(-REST.upper, -0.55, w) + gesture * 0.5;
-    rl.rotation.z = THREE.MathUtils.lerp(-REST.lower, 1.85 + swing * 0.5, w);
+    // forearm sways side to side; the twist (y) turns the palm to face the viewer
+    rl.rotation.set(0, 1.4 * w, THREE.MathUtils.lerp(-REST.lower, 1.85 + swing * 0.5, w));
     rh.rotation.z = 0;
     lu.rotation.z = REST.upper - gesture * 0.4;
     ll.rotation.z = REST.lower + gesture;
