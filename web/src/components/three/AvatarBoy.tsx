@@ -55,7 +55,7 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
   const [vrm, setVrm] = useState<VRM | null>(null);
   const mic = useRef<THREE.MeshStandardMaterial | undefined>(undefined);
   const { camera, size } = useThree();
-  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 1.2, wasInCall: false, nod: 0, nextNod: 3 });
+  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 2.4, wasInCall: false, nod: 0, nextNod: 3 });
 
   useEffect(() => {
     const loader = new GLTFLoader();
@@ -111,8 +111,8 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
       VOWELS.forEach((k, i) => ease(k, i === s.vowel ? open : 0, 0.5));
       ease("joy", 0.25);
     } else {
-      VOWELS.forEach((k) => ease(k, k === "aa" ? 0.22 : 0, 0.3));
-      ease("joy", 0.7, 0.15);
+      VOWELS.forEach((k) => ease(k, k === "aa" ? 0.38 : 0, 0.3));
+      ease("joy", 0.6, 0.15);
     }
 
     // --- blink
@@ -138,15 +138,16 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     bone("spine").rotation.z = Math.sin(s.t * 0.9) * 0.012;
 
     // --- arms: wave on load and when a call connects; small gestures while talking
-    if (inCall !== s.wasInCall) { s.wasInCall = inCall; if (inCall) s.wave = 1.2; }
+    if (inCall !== s.wasInCall) { s.wasInCall = inCall; if (inCall) s.wave = 2.4; }
     s.wave = Math.max(0, s.wave - dt * 0.5);
-    const w = Math.min(1, s.wave * 2.2) * Math.min(1, (1.2 - s.wave) * 6); // fade in and out
+    const w = Math.min(1, s.wave * 2.5) * Math.min(1, (2.4 - s.wave) * 4); // raise, wave, lower
     const ru = bone("rightUpperArm"), rl = bone("rightLowerArm"), rh = bone("rightHand");
     const lu = bone("leftUpperArm"), ll = bone("leftLowerArm");
     const gesture = speaking ? Math.max(0, Math.sin(s.t * 2.2)) * 0.18 : 0;
-    ru.rotation.z = THREE.MathUtils.lerp(-REST.upper, -0.75, w) + gesture * 0.5;
-    rl.rotation.z = THREE.MathUtils.lerp(-REST.lower, 1.9 + Math.sin(s.t * 9) * 0.28, w);
-    rh.rotation.z = 0.2 * w;
+    const swing = Math.sin(s.t * 10);
+    ru.rotation.z = THREE.MathUtils.lerp(-REST.upper, -0.55 + swing * 0.04, w) + gesture * 0.5;
+    rl.rotation.z = THREE.MathUtils.lerp(-REST.lower, 2.0 + swing * 0.32, w);
+    rh.rotation.z = Math.sin(s.t * 10 + 0.7) * 0.4 * w;
     lu.rotation.z = REST.upper - gesture * 0.4;
     ll.rotation.z = REST.lower + gesture;
     ll.rotation.y = -gesture * 1.2;
