@@ -92,6 +92,19 @@ class Receptionist(Agent):
         self.state = state
         self.doctor_ids = doctor_ids
 
+    def phone_mode(self, on: bool) -> None:
+        """While collecting the number: English speech recognition (digits come out
+        as numbers) and longer pauses; back to Bangla once it is confirmed."""
+        if on == self.state.collecting_phone:
+            return
+        self.state.collecting_phone = on
+        pause = PHONE_PAUSE if on else NORMAL_PAUSE
+        self.session.update_options(min_endpointing_delay=pause[0], max_endpointing_delay=pause[1])
+        stt = self.session.stt
+        if stt is not None:
+            stt.update_options(language="en-IN" if on else "bn", numerals=on)
+        logger.info("phone mode %s", "on (en-IN)" if on else "off (bn)")
+
     async def on_enter(self) -> None:
         await self.session.say(
             "আসসালামু আলাইকুম, রাকিব ডেন্টাল কেয়ার থেকে বলছি। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?",
@@ -191,9 +204,8 @@ class Receptionist(Agent):
             if not e164:
                 return {"ok": False, "error": "invalid_phone",
                         "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
-            self.state.collecting_phone = False
             self.state.phone_confirmed = True
-            self.session.update_options(min_endpointing_delay=NORMAL_PAUSE[0], max_endpointing_delay=NORMAL_PAUSE[1])
+            self.phone_mode(False)
             return {"ok": True, "phone_e164": e164, "say_phone": say_phone(e164),
                     "note": "Read say_phone back and ask if it is correct. If the caller says it is wrong, ask again."}
         return await self._run("confirm_phone", {"spoken": spoken}, go())
@@ -290,7 +302,11 @@ class Receptionist(Agent):
     # Clean up Kolkata words before anything is spoken.
     async def tts_node(self, text, model_settings):
         async def fixed():
+            said = ""
             async for chunk in text:
+                said += chunk
+                if "নম্বর" in said and not self.state.phone_confirmed:
+                    self.phone_mode(True)
                 yield dhaka_words(chunk)
         return Agent.default.tts_node(self, fixed(), model_settings)
 
@@ -338,10 +354,6 @@ async def entrypoint(ctx: JobContext) -> None:
         text = (getattr(item, "text_content", None) or "").strip()
         if role not in ("user", "assistant") or not text:
             return
-        # The agent just asked for the phone number (and hasn't confirmed one yet).
-        if role == "assistant" and "নম্বর" in text and "?" in text and not state.phone_confirmed and not state.collecting_phone:
-            state.collecting_phone = True
-            session.update_options(min_endpointing_delay=PHONE_PAUSE[0], max_endpointing_delay=PHONE_PAUSE[1])
         state.seq += 1
         offset = int((time.monotonic() - state.started) * 1000)
         fire(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",
