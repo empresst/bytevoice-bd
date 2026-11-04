@@ -40,7 +40,11 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
   const [error, setError] = useState<CallError | null>(null);
   const joinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const setPhase = useCallback((p: CallPhase) => { setPhaseState(p); onPhase?.(p); }, [onPhase]);
+  const setPhase = useCallback((p: CallPhase) => {
+    setPhaseState(p);
+    onPhase?.(p);
+    if (p === "ended") window.dispatchEvent(new Event("bv-call-ended")); // lets the doctor board refresh
+  }, [onPhase]);
 
   const fail = useCallback(async (e: CallError) => {
     if (joinTimer.current) clearTimeout(joinTimer.current);
@@ -54,7 +58,10 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
       if (joinTimer.current) clearTimeout(joinTimer.current);
       setPhase("live");
     };
-    const onDisconnected = () => setPhaseState((p) => (p === "error" ? p : "ended"));
+    const onDisconnected = () => setPhaseState((p) => {
+      if (p !== "error" && p !== "ended") { onPhase?.("ended"); window.dispatchEvent(new Event("bv-call-ended")); }
+      return p === "error" ? p : "ended";
+    });
     const onMediaFailure = (e: Error) => {
       const f = MediaDeviceFailure.getFailure(e);
       void fail(f === MediaDeviceFailure.PermissionDenied ? "mic_denied" : f === MediaDeviceFailure.NotFound ? "no_mic" : "unknown");
@@ -63,7 +70,7 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
     room.on(RoomEvent.Disconnected, onDisconnected);
     room.on(RoomEvent.MediaDevicesError, onMediaFailure);
     return () => { room.removeAllListeners(); void room.disconnect(); };
-  }, [room, fail, setPhase]);
+  }, [room, fail, setPhase, onPhase]);
 
   const start = useCallback(async () => {
     setError(null);
@@ -102,6 +109,12 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
     await room.disconnect();
     setPhase("ended");
   }, [room, setPhase]);
+
+  useEffect(() => {
+    const onRequest = () => { if (phase === "idle" || phase === "ended" || phase === "error") void start(); };
+    window.addEventListener("bv-start-call", onRequest);
+    return () => window.removeEventListener("bv-start-call", onRequest);
+  }, [phase, start]);
 
   return { room, phase, error, start, end };
 }

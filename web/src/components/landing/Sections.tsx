@@ -29,6 +29,7 @@ export function Nav() {
           ByteVoice <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">BD</span>
         </a>
         <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">
+          <a href="#doctors" className="hover:text-white">{t(n.doctors)}</a>
           <a href="#how" className="hover:text-white">{t(n.how)}</a>
           <a href="#features" className="hover:text-white">{t(n.features)}</a>
           <a href="#use-cases" className="hover:text-white">{t(n.useCases)}</a>

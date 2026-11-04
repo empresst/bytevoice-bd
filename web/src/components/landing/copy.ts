@@ -1,6 +1,7 @@
 // All landing page text, Bangla first. Content is a demo pitch, not real company claims.
 export const COPY = {
   nav: {
+    doctors: { bn: "চিকিৎসক ও স্লট", en: "Doctors & slots" },
     how: { bn: "কীভাবে কাজ করে", en: "How it works" },
     features: { bn: "সুবিধা", en: "Features" },
     useCases: { bn: "কাদের জন্য", en: "Who it's for" },
@@ -10,7 +11,7 @@ export const COPY = {
   },
   hero: {
     badge: { bn: "ByteVoice এখন বাংলাদেশে", en: "ByteVoice is now in Bangladesh" },
-    title1: { bn: "আপনার হাসির যত্নে, আমরা আছি সবসময়।", en: "Caring for your smile, we're always here." },
+    title1: { bn: "আপনার হাসির যত্নে, আমরা আছি সবসময়!", en: "Caring for your smile, we're always here." },
     title2: { bn: "আপনার ডেন্টাল ক্লিনিকের AI সহকারী — এখন বাংলায়, ২৪/৭।", en: "Your dental clinic's AI assistant — now in Bangla, 24/7." },
     try: { bn: "এখনই কথা বলে দেখুন: রাকিব ডেন্টাল কেয়ার (ডেমো ক্লিনিক)", en: "Try it now: Rakib Dental Care (demo clinic)" },
     portalCta: { bn: "কল কোথায় জমা হয় দেখুন →", en: "See where calls are stored →" },
