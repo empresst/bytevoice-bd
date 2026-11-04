@@ -56,6 +56,10 @@ DHAKA = ZoneInfo("Asia/Dhaka")
 AGENT_NAME = os.getenv("AGENT_NAME", "bytevoice-bd")
 MAX_CALL_SECONDS = int(os.getenv("MAX_CALL_DURATION_SECONDS", "300"))
 PARTS_OF_DAY = {"morning": (0, 12), "afternoon": (12, 17), "evening": (17, 24)}
+BN_TO_ASCII = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+# (min, max) seconds of silence before the caller's turn counts as finished.
+NORMAL_PAUSE = (0.8, 3.0)
+PHONE_PAUSE = (2.0, 5.0)  # people read numbers in chunks: 01712 ... 345 ... 678
 
 ServiceCode = Literal["checkup", "scaling", "filling", "root_canal", "extraction",
                       "braces_consult", "whitening", "child_checkup"]
@@ -72,6 +76,8 @@ class CallState:
         self.outcome: str | None = None  # set only when a booking tool really succeeded
         self.latencies: list[float] = []
         self.end_reason = "caller_hangup"
+        self.collecting_phone = False
+        self.phone_confirmed = False
 
 
 class Receptionist(Agent):
@@ -154,14 +160,23 @@ class Receptionist(Agent):
     async def confirm_phone(
         self,
         context: RunContext,
-        phone: Annotated[str, Field(description="The mobile number exactly as the caller said it in THIS call, Bangla or English digits. Never invent or reuse an example number; if the caller has not said it, ask first.")],
+        phone: Annotated[str, Field(description="ALL digits the caller has said for their number in THIS call so far, joined together (callers often say it in 2-3 parts). Never invent or reuse an example number.")],
     ) -> dict:
-        """Validate a Bangladeshi mobile number and get the digit-by-digit read-back."""
+        """Check a Bangladeshi mobile number. If it is only partly said, wait for the rest."""
         async def go() -> dict:
-            e164 = await db.normalize_phone(phone)
+            digits = "".join(ch for ch in phone.translate(BN_TO_ASCII) if ch.isdigit())
+            if digits.startswith("880"):
+                digits = "0" + digits[3:]
+            if len(digits) < 11:
+                return {"ok": False, "error": "incomplete", "digits_so_far": digits,
+                        "say": "জি", "note": "Number not finished. Say only 'জি' and wait; then call again with ALL digits joined."}
+            e164 = await db.normalize_phone(digits)
             if not e164:
                 return {"ok": False, "error": "invalid_phone",
-                        "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন?"}
+                        "say": "নম্বরটা ঠিক মিলছে না। এগারো অংকের মোবাইল নম্বরটা আরেকবার বলবেন? আস্তে আস্তে বললেও হবে।"}
+            self.state.collecting_phone = False
+            self.state.phone_confirmed = True
+            self.session.update_options(min_endpointing_delay=NORMAL_PAUSE[0], max_endpointing_delay=NORMAL_PAUSE[1])
             return {"ok": True, "phone_e164": e164, "say_phone": say_phone(e164)}
         return await self._run("confirm_phone", {"phone": phone}, go())
 
@@ -287,8 +302,8 @@ async def entrypoint(ctx: JobContext) -> None:
         vad=ctx.proc.userdata["vad"],
         # Wait for a real pause before answering: Bangla speakers often pause mid-sentence.
         turn_detection="vad",
-        min_endpointing_delay=0.8,
-        max_endpointing_delay=3.0,
+        min_endpointing_delay=NORMAL_PAUSE[0],
+        max_endpointing_delay=NORMAL_PAUSE[1],
         # Don't start the LLM before the caller finishes; it doubles requests on Groq's free limits.
         preemptive_generation=False,
         # Ignore "hmm"/"জি" while the agent talks; only real interruptions stop it.
@@ -305,6 +320,10 @@ async def entrypoint(ctx: JobContext) -> None:
         text = (getattr(item, "text_content", None) or "").strip()
         if role not in ("user", "assistant") or not text:
             return
+        # The agent just asked for the phone number (and hasn't confirmed one yet).
+        if role == "assistant" and "নম্বর" in text and "?" in text and not state.phone_confirmed and not state.collecting_phone:
+            state.collecting_phone = True
+            session.update_options(min_endpointing_delay=PHONE_PAUSE[0], max_endpointing_delay=PHONE_PAUSE[1])
         state.seq += 1
         offset = int((time.monotonic() - state.started) * 1000)
         fire(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",

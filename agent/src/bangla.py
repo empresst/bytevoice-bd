@@ -84,7 +84,12 @@ DHAKA_WORDS = {
 _DHAKA_RE = re.compile(r"(?<![ঀ-৿])(" + "|".join(map(re.escape, DHAKA_WORDS)) + r")(?![ঀ-৿])")
 
 
+# Abbreviations a voice would read letter by letter ("ডা." -> "ডা").
+_ABBREV_RE = re.compile(r"ডা\.\s*")
+
+
 def dhaka_words(text: str) -> str:
+    text = _ABBREV_RE.sub("ডাক্তার ", text)
     return _DHAKA_RE.sub(lambda m: DHAKA_WORDS[m.group(1)], text)
 
 
