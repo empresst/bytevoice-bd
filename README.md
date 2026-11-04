@@ -150,4 +150,4 @@ Deploy: `lk agent create --project <project> --secrets-file … --region ap-sout
 
 ## Credits
 
-3D character: *Sakurada Fumiriya* by pixiv (VRoid), used under its VRoid Hub licence (free use, credit not required). Everything else is original or open-source; see [docs/CREDITS.md](docs/CREDITS.md). Code was written with help from Claude (Anthropic); I can explain every part of it.
+3D character: *Sakurada Fumiriya* by pixiv (VRoid), used under its VRoid Hub licence (free use, credit not required). Everything else is original or open-source; see [docs/CREDITS.md](docs/CREDITS.md). Every guard and corner case is listed in [docs/GUARDS.md](docs/GUARDS.md). Code was written with help from Claude (Anthropic); I can explain every part of it.

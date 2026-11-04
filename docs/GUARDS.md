@@ -1,0 +1,157 @@
+# Guards and corner cases
+
+Everything the system does to stay correct, safe and polite when callers (or the internet) don't behave as expected. Each item says **where** it is enforced, so it can be checked in the code.
+
+Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`, **Prompt** = `agent/src/prompt.py`, **Web** = `web/src`.
+
+---
+
+## 1. Booking correctness
+
+| Case | What happens | Where |
+|---|---|---|
+| Two callers book the same doctor at the same time | Impossible: an `EXCLUDE` constraint rejects any overlapping *scheduled* appointment for a doctor, even under concurrent calls; the agent gets `slot_taken` and offers another time | DB `no_double_booking` |
+| Caller picks a time that isn't a real slot (outside chamber hours, wrong length, already taken) | `book_appointment` re-checks `available_slots()` before inserting → `slot_unavailable` | DB |
+| Caller asks for a time the agent didn't offer ("চারটায় হবে?") | The agent must call `check_availability` again with `preferred_time`; it may never say "খালি নেই" without checking | Prompt + Agent |
+| Agent says "দেখছি" and then stops | Prompt requires the check in the same reply (fixed after a test showed silence) | Prompt |
+| Caller names a doctor who doesn't do that service (root canal with Dr. Tanvir) | Each doctor's services are in the prompt; the agent says who does it ("রুট ক্যানেল ডা. নুসরাত জাহান করেন") | Prompt + DB `doctor_services` |
+| Caller didn't name a doctor | Availability searches **all** doctors; a named doctor's slots are listed first | Agent `check_availability` |
+| Friday | Clinic closed: the tool returns `closed_friday`, the prompt calendar marks it, the slot board shows "বন্ধ" | Agent + Prompt + Web |
+| Past date ("গতকাল") | `date_in_past` → asks for another day | Agent |
+| Malformed date from the model | `bad_date` returned, never sent to the DB | Agent |
+| Relative dates ("আগামী রবিবার", "কাল সন্ধ্যায়", "পরশু") | An 8-day calendar (Bangla + English weekday) is in the prompt; part of day maps to morning/afternoon/evening | Prompt + Agent |
+| Caller changes their mind mid-booking | Re-checks the new day; nothing is booked until the final confirmation | Prompt |
+| Booking without a full summary | Step 6: read name, day, time, doctor, service back and ask "ঠিক আছে?"; book only after yes | Prompt |
+| Agent claims "বুক হয়ে গেছে" before booking | Forbidden until the booking tool succeeds | Prompt |
+| No name given | `name_required`; the prompt requires asking and confirming the full name | DB + Prompt |
+| Reschedule / cancel someone else's appointment | Functions require the phone the appointment was booked with → `appointment_not_found` | DB |
+| Cancel/reschedule when no appointment exists | `find_appointments` returns an empty list; the agent says so | DB + Agent |
+| Reschedule keeps the same service length and doctor; the old slot is freed | `reschedule_appointment` + exclusion constraint ignoring itself | DB |
+| History is never lost | Every booking, reschedule and cancellation is written to `appointment_events` with old/new time and the call that did it | DB |
+| Each booking/cancel is all-or-nothing | Postgres functions run in one transaction | DB |
+| Families share one phone (common in Bangladesh) | Patients are matched on phone **and** name, so a sibling gets their own record | DB `book_appointment` |
+| Preparation before a visit | Root canal and extraction carry prep notes (e.g. bring old X-rays, don't come on an empty stomach), said after booking | DB seed + Prompt |
+
+## 2. Phone numbers
+
+| Case | What happens | Where |
+|---|---|---|
+| Number said in English, Bangla words, digits, or mixed ("জিরো ওয়ান", "শূন্য এক", "০১৭১২", "01712") | Converted to digits **in code**, not by the LLM | Agent `spoken_digits` |
+| "double one", "triple five", "ডাবল", "ট্রিপল" | Expanded | Agent |
+| Deepgram's Bangla model mishears English digits | While collecting the number, speech recognition switches to **English (`en-IN`) with numerals**, then back to Bangla | Agent `phone_mode` |
+| Number said in parts with pauses | Longer silence allowed while collecting the number (2–5 s instead of 0.8–3 s); parts are joined; "জি" between parts | Agent |
+| Still incomplete after two parts | Reads back once what it has: "এখন পর্যন্ত পেয়েছি …" | Agent |
+| Caller restarts the number ("01…") | Treated as a fresh attempt, never glued to earlier pieces | Agent |
+| Doesn't start with 01 / +880 1 | Said as soon as it is heard: "বাংলাদেশের মোবাইল নম্বর শূন্য এক দিয়ে শুরু হয়…" | Agent |
+| Invalid operator (012…) | "শূন্য এক-এর পরে তিন থেকে নয়ের মধ্যে কোনো অংক হয়…" | Agent |
+| More than 11 digits | "নম্বরে এগারোটার বেশি অংক হয়ে গেছে…", starts over | Agent |
+| Three wrong attempts | Stops asking and offers a staff callback (no loop) | Agent |
+| Model invents a number | Tool and prompt forbid it; the number must come from this call | Prompt + tool description |
+| Read back | Always digit by digit in Bangla, grouped 5-3-3 | Agent `say_phone` |
+| Stored format | `normalize_bd_phone()` + CHECK constraint: only `+8801[3-9]XXXXXXXX` | DB |
+
+## 3. Safety and scope
+
+| Case | What happens | Where |
+|---|---|---|
+| Medicine / diagnosis questions | Politely declined ("ডাক্তারই বলতে পারবেন"), offers an appointment or callback | Prompt |
+| Emergency (heavy bleeding, swelling, fever, breathing trouble) | Tells the caller to go to a hospital emergency now and records an `emergency` callback | Prompt + `request_callback` |
+| Caller wants a human / the doctor / has a complaint or billing issue | "আমাদের টিম আপনাকে ফোন করবে", takes reason and number, records a callback for staff | Prompt + `callbacks` |
+| Off-topic (weather, cricket, politics, other businesses) | One polite sentence, back to the appointment; never answered | Prompt |
+| "তুমি কে?" / "তুমি কি মানুষ?" | Honest: "আমি রাকিব ডেন্টাল কেয়ারের AI সহকারী…" | Prompt |
+| Pranks or abuse | One polite warning, then goodbye and `end_call` | Prompt |
+| Invented clinic information | Only facts in the prompt (from the DB) or from tools may be used | Prompt |
+| Long calls | Hard limit of 5 minutes, then a polite goodbye | Agent `MAX_CALL_DURATION_SECONDS` |
+
+## 4. Language and voice
+
+| Case | What happens | Where |
+|---|---|---|
+| Sounding Kolkata | Bangladeshi-trained voices only (Cartesia, Azure `bn-BD`); Bangla prompt with Dhaka examples and a banned-word list | Prompt + voice config |
+| Kolkata words slip through (নমস্কার, জল, স্নান, নিমন্ত্রণ, জলখাবার, আজ্ঞে) | Replaced with Dhaka words just before speech; whole words only ("জলদি" untouched) | Agent `dhaka_words` |
+| Caller speaks English | Understands, always answers in Bangla, including the goodbye | Prompt |
+| Second LLM goodbye in English after `end_call` | `end_call` produces no extra reply | Agent |
+| "ডা." read as "da" | Spoken as "ডাক্তার" | Agent |
+| Azure mispronounces "সাড়ে" | For Azure only: "সাড়ে পাঁচটা" → "পাঁচটা তিরিশে" | Agent `AzureBanglaTTS` |
+| Times, dates, numbers | Generated in code ("বিকাল সাড়ে পাঁচটা", "দুপুর দেড়টা", "রবিবার, ৮ নভেম্বর"); the LLM copies them | Agent `bangla.py` |
+| Codes/IDs spoken aloud | Forbidden (`service_code`, doctor codes stay internal) | Prompt |
+
+## 5. Turn-taking and timing
+
+| Case | What happens | Where |
+|---|---|---|
+| Caller pauses mid-sentence | Waits 0.8 s of silence (max 3 s) before answering | Agent session |
+| Caller says "জি"/"হুঁ" while the agent talks | Not an interruption (needs ≥ 0.6 s and ≥ 2 words) | Agent session |
+| Caller interrupts | Agent stops and listens; counted per call | LiveKit + Agent |
+| Waiting on the database | Instant "জি, একটু দেখছি…" / "জি, বুক করছি…" — skipped if the agent just said something similar | Agent `_ack` |
+| Slow replies | Reply drafting starts while the end of speech is confirmed (preemptive generation) | Agent session |
+| Silence | After ~12 s: "হ্যালো, আপনি কি শুনতে পাচ্ছেন?"; then a polite hang-up | Agent `handle_silence` |
+| Measuring all of this | Per-reply response time, end-of-speech wait, first LLM token, first audio, interruptions and models used are stored and shown in the portal | Agent `CallQuality` + DB `calls.quality` |
+
+## 6. Reliability
+
+| Case | What happens | Where |
+|---|---|---|
+| LLM down or rate-limited | Fallback chain: Gemma 4 → Groq gpt-oss-120b → Groq qwen | Agent `voice.py` |
+| Voice provider down or out of credit | Fallback between Cartesia and Azure, mid-call | Agent `voice.py` |
+| A tool errors or hangs | 8 s timeout; a friendly Bangla message and an offer for staff to call back; never raises into the LLM | Agent `_run` |
+| Every tool call | Logged with input, output, success and duration (`tool_invocations`) | Agent + DB |
+| Post-call processing fails | Call marked `failed` instead of staying half-written | Agent `finish` |
+| Agent process dies mid-call | Calls still "live" after 15 min are shown as failed, not "Live now" | DB view + Web |
+| Agent never joins the browser call | 30 s timeout with a clear message | Web `CallWidget` |
+| Hosted agent going to sleep | Deployed agent checked after a long idle period (wake test) | Ops |
+
+## 7. Data quality after the call
+
+| Case | What happens | Where |
+|---|---|---|
+| Model output doesn't fit the schema | Pydantic validation; failures recorded in `validation_errors`, never stored as facts | Agent `extraction.py` |
+| Model uses variants ("book_appointment", "Booked", "inquiry", "callback needed") | Mapped to the allowed values instead of discarding the whole result | Agent |
+| Model claims "booked" but nothing was booked | Outcome comes from what the tools actually did in the DB; the mismatch is recorded | Agent |
+| Romanised name contains Bangla or junk | Dropped (`[A-Za-z .'-]` only) | Agent |
+| Phone in the extraction is invalid | Dropped and recorded | Agent + DB |
+| Preferred time can't be parsed | Dropped and recorded; the caller's own words are still kept | Agent |
+| Caller said nothing | Stored as `incomplete` without an LLM call | Agent |
+| Duplicate extraction | `on conflict do nothing` | DB |
+| Time zones | Stored in UTC, shown in Asia/Dhaka everywhere | DB + Web |
+
+## 8. Security and privacy
+
+| Case | What happens | Where |
+|---|---|---|
+| Signed-out visitors reading data | Row-level security on every table; `anon` has no table access | DB |
+| Staff seeing other clinics | Policies limit reads to `current_staff_clinic()` | DB |
+| Portal users changing bookings or calling booking functions | No update policies except closing callbacks; `execute` on booking functions revoked from portal roles (tested: 0 rows / permission denied) | DB |
+| Public slot board leaking patients | `/api/availability` returns only doctor, time and booked/free | Web |
+| Someone spamming the call button | 5 calls/hour per visitor, stored in Postgres; IP kept only as a salted hash | Web `/api/call` |
+| Tokens reused | 10-minute, room-scoped token; a new room per call (dispatch happens on room creation) | Web `/api/call` |
+| Secrets | Never in git (`.env*` ignored, staged diffs scanned before every commit); agent secrets in LiveKit, web secrets in Vercel | Repo + hosting |
+| Recordings | Not stored (privacy by default) | — |
+
+## 9. Browser and UI
+
+| Case | What happens | Where |
+|---|---|---|
+| Microphone blocked / missing | Clear Bangla/English message with how to allow it | Web `CallWidget` |
+| Network error / rate-limited | Specific messages | Web |
+| Browser blocks audio autoplay | "শব্দ চালু করুন" button | Web |
+| Call states | Connecting → calling the receptionist → live (listening/thinking/speaking, captions) → ended | Web |
+| Slow 3D load / no WebGL | Soft glow placeholder; the page works without the 3D | Web |
+| Two 3D scenes at once | Byte only renders while its section is on screen | Web `LazyByte` |
+| Phones | Mobile framing (head and shoulders), no horizontal overflow | Web |
+| Slot board edge cases | Friday "বন্ধ", "এই দিনে চেম্বার নেই", "কোনো স্লট পাওয়া যাচ্ছে না"; booked slots disabled; refreshes after each call and every 30 s | Web `DoctorBoard` |
+
+## 10. How these were checked
+
+- **Unit tests** (`agent/tests`, `uv run pytest`): spoken-number parsing, phone read-back, Bangla times/dates, word fixes, Azure rewrite, extraction aliases and name validation.
+- **Database tests** (run inside a rolled-back transaction): phone normalisation, slots, double booking (including a forced overlapping insert), invalid phone, family members, find by Bangla-digit phone, reschedule frees the old slot, cancel with the wrong phone, event history.
+- **Conversation sweep** (17 scripted calls through `lk agent debugger`): evening/relative dates, Friday, past date, wrong doctor for a service, fees and hours, address and payment, parking, emergency, medicine, off-topic, prank, English caller, human request, cancel with no booking, reschedule, code-switching, changing mind. Four failures were found and fixed (announce-without-checking, doctor/service mapping, parking, human handover).
+- **RLS checks** run as the reviewer and as an anonymous user.
+- **Live voice calls** for turn-taking, interruptions and latency.
+
+## Known gaps
+
+- Numbers spoken as Bangla words during the phone step are recognised less reliably than English digits.
+- About 2 s per reply on free models.
+- Lip movement follows "agent is speaking" and audio level, not phonemes.
+- No SMS confirmation, clinic-software integration or multi-clinic onboarding.
