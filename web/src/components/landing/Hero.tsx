@@ -11,7 +11,7 @@ import { DhakaSkyline } from "./DhakaSkyline";
 import { useLang, useT } from "./i18n";
 
 // Three.js only runs in the browser; show a soft glow until it loads.
-const ByteMascot = dynamic(() => import("@/components/three/ByteMascot"), {
+const AvatarBoy = dynamic(() => import("@/components/three/AvatarBoy"), {
   ssr: false,
   loading: () => <div className="mx-auto mt-16 h-64 w-64 animate-pulse rounded-full bg-indigo-500/20 blur-2xl" />,
 });
@@ -50,7 +50,7 @@ export function Hero() {
         </div>
 
         <div className="relative h-[340px] min-w-0 sm:h-[460px] lg:h-[560px]">
-          <ByteMascot voice={voice} />
+          <AvatarBoy voice={voice} />
           {h.chips.map((c, i) => (
             <motion.div
               key={i}

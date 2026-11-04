@@ -11,6 +11,7 @@
   "dependencies": {
     "@livekit/components-react": "^2.9.24",
     "@livekit/protocol": "^1.51.0",
+    "@pixiv/three-vrm": "^3.5.5",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@supabase/ssr": "^0.12.7",

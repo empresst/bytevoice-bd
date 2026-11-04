@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useState } from "react";
 import { COPY } from "./copy";
+import { LazyByte } from "./LazyByte";
 import { LangToggle, useLang, useT } from "./i18n";
 
 const reveal = { initial: { opacity: 0, y: 24 }, whileInView: { opacity: 1, y: 0 }, viewport: { once: true, margin: "-80px" }, transition: { duration: 0.5 } };
@@ -159,9 +160,10 @@ export function DemoCta() {
   return (
     <section id="demo" className="px-4 pb-20 sm:px-6">
       <motion.div {...reveal} className="mx-auto grid max-w-5xl gap-8 rounded-3xl border border-white/10 bg-gradient-to-br from-indigo-600/30 via-[#0b1226] to-amber-500/20 p-8 sm:p-12 lg:grid-cols-2">
-        <div>
+        <div className="flex flex-col">
           <h2 className="text-3xl font-bold">{t(c.title)}</h2>
           <p className="mt-3 text-slate-300">{t(c.sub)}</p>
+          <LazyByte className="mx-auto mt-4 h-56 w-56 sm:h-64 sm:w-64 lg:mx-0" />
         </div>
         {sent ? (
           <p className="self-center rounded-xl bg-emerald-500/15 p-4 text-emerald-200">{t(c.sent)}</p>
