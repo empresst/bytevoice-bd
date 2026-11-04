@@ -8,12 +8,15 @@ export const dynamic = "force-dynamic";
 
 type CallRow = { id: string; started_at: string; duration_s: number | null; status: string; outcome: string | null; caller_name_bn: string | null; caller_name_en: string | null; caller_phone: string | null; reason_for_visit: string | null };
 
+const daysAgo = (n: number) => new Date(Date.now() - n * 864e5).toISOString();
+const nowIso = () => new Date().toISOString();
+
 export default async function Dashboard() {
   const supabase = await supabaseServer();
-  const since = new Date(Date.now() - 7 * 864e5).toISOString();
+  const since = daysAgo(7);
   const [{ data: calls }, { data: upcoming }, { count: openCallbacks }, { data: latency }] = await Promise.all([
     supabase.from("call_list").select("id, started_at, duration_s, status, outcome, caller_name_bn, caller_name_en, caller_phone, reason_for_visit").gte("started_at", since).order("started_at", { ascending: false }),
-    supabase.from("appointments").select("id, starts_at, status, patients(full_name_bn, full_name_en), doctors(full_name_en), services(name_en)").eq("status", "scheduled").gte("starts_at", new Date().toISOString()).order("starts_at").limit(6),
+    supabase.from("appointments").select("id, starts_at, status, patients(full_name_bn, full_name_en), doctors(full_name_en), services(name_en)").eq("status", "scheduled").gte("starts_at", nowIso()).order("starts_at").limit(6),
     supabase.from("callbacks").select("id", { count: "exact", head: true }).eq("status", "open"),
     supabase.from("calls").select("avg_latency_ms, quality").gte("started_at", since).not("avg_latency_ms", "is", null),
   ]);

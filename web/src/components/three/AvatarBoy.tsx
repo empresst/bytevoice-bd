@@ -3,7 +3,7 @@
 import { Sparkles } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { type VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { VoiceState } from "./ByteMascot";
@@ -174,7 +174,7 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
 
 export default function AvatarBoy({ voice }: { voice: React.RefObject<VoiceState> }) {
   const [ready, setReady] = useState(false);
-  const onReady = useRef(() => setReady(true)).current;
+  const onReady = useCallback(() => setReady(true), []);
   return (
     <div className="relative h-full w-full [mask-image:linear-gradient(to_bottom,black_72%,transparent_98%)]">
       {!ready && <div className="absolute left-1/2 top-1/3 h-56 w-56 -translate-x-1/2 animate-pulse rounded-full bg-indigo-400/20 blur-2xl" aria-hidden />}

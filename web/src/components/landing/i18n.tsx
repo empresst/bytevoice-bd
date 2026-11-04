@@ -11,6 +11,8 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("bv-lang");
+      // Read after hydration so server and first client render match.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved === "bn" || saved === "en") setLangState(saved);
     } catch {}
   }, []);

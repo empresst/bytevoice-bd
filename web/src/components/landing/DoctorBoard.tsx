@@ -110,6 +110,8 @@ export function DoctorBoard() {
     } catch {}
   }, []);
   useEffect(() => {
+    // Fetch on mount, then poll; setState happens after the network round trip.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     const id = setInterval(load, 30_000);
     const onEnded = () => setTimeout(load, 4000); // after the agent has saved the booking
