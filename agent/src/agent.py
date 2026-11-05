@@ -175,6 +175,7 @@ class Receptionist(Agent):
         self.doctor_days = doctor_days  # code -> chamber weekdays (Postgres: 0 = Sunday)
         self.last_spoke = 0.0
         self.slot_changes = 0
+        self.activity_count = 0
         self.hangup_token: object | None = None  # set while a hang-up is pending after the goodbye
 
     def phone_mode(self, on: bool) -> None:
@@ -260,7 +261,10 @@ class Receptionist(Agent):
         t0 = time.perf_counter()
         activity = TOOL_ACTIVITY.get(name)
         if activity:
-            fire(self._signal({"bv.activity": activity}))
+            # Numbered and never cleared: the tool takes ~0.15 s, and a phone may merge a
+            # quick "checking" -> "" into just "", so the website reacts to each new value.
+            self.activity_count += 1
+            fire(self._signal({"bv.activity": f"{activity}:{self.activity_count}"}))
         try:
             result = await asyncio.wait_for(coro, timeout=8)
             ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
@@ -271,7 +275,7 @@ class Receptionist(Agent):
             _ = e
         ms = int((time.perf_counter() - t0) * 1000)
         fire(db.log_tool(self.state.call_id, name, args, result, ok, ms))
-        done = {"bv.activity": ""} if activity else {}
+        done = {}
         if ok and name in SLOT_CHANGING_TOOLS:
             self.slot_changes += 1
             done["bv.slots"] = str(self.slot_changes)  # the website's slot board reloads on change

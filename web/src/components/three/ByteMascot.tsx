@@ -16,8 +16,8 @@ export type VoiceState = {
   phase: "idle" | "connecting" | "waiting" | "live" | "ended" | "error";
   /** true while the agent is talking (from LiveKit's agent state) */
   speaking: boolean;
-  /** true while the agent checks or books something (it looks down, as if at the schedule) */
-  busy?: boolean;
+  /** performance.now() until which the agent is "checking the schedule" (avatar looks down) */
+  busyUntil?: number;
 };
 
 const BLUE = "#5b7cf0";

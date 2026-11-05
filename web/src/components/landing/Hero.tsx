@@ -21,8 +21,10 @@ export function Hero() {
   const { lang } = useLang();
   const voice = useRef<VoiceState>({ level: 0, phase: "idle", speaking: false });
   const onLevel = useCallback((l: number) => { voice.current.level = l; }, []);
-  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") { voice.current.level = 0; voice.current.speaking = false; voice.current.busy = false; } }, []);
-  const onActivity = useCallback((a: string) => { voice.current.busy = a !== ""; }, []);
+  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") { voice.current.level = 0; voice.current.speaking = false; voice.current.busyUntil = 0; } }, []);
+  // Each new "checking:N"/"booking:N" from the agent = look down for a moment (timed here,
+  // so a fast database step can't be missed).
+  const onActivity = useCallback((a: string) => { if (a) voice.current.busyUntil = performance.now() + 2000; }, []);
   const onAgentState = useCallback((s: string) => { voice.current.speaking = s === "speaking"; }, []);
   const h = COPY.hero;
 

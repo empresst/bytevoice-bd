@@ -21,7 +21,6 @@ const VOWELS = ["aa", "ih", "ou", "ee", "oh"] as const;
 
 // Resting arm pose (VRM normalised bones; 0 = T-pose).
 const REST = { upper: 1.2, lower: 0.15 };
-const LOOK_HOLD = 2.0; // seconds the "checking the schedule" look lasts at least
 // Wave: forearm raised with the palm turned to the viewer; it sways left-right
 // around the camera axis (applied on top of the pose, so the palm stays facing out).
 const FOREARM_REST = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -REST.lower));
@@ -68,7 +67,7 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
   const [vrm, setVrm] = useState<VRM | null>(null);
   const mic = useRef<THREE.MeshStandardMaterial | undefined>(undefined);
   const { camera, size } = useThree();
-  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 2.4, wasInCall: false, nod: 0, nextNod: 3, look: 0, lookHold: 0, wasBusy: false });
+  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 2.4, wasInCall: false, nod: 0, nextNod: 3, look: 0 });
 
   useEffect(() => {
     const loader = new GLTFLoader();
@@ -135,12 +134,9 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     em.setValue("blink", Math.sin(s.blink * Math.PI));
 
     // --- looks down (as if at the schedule) while the agent checks or books something.
-    // The database step takes ~0.15 s, so hold the pose ~2 s, about as long as "জি, দেখছি".
-    const busy = !!v?.busy && inCall;
-    if (busy && !s.wasBusy) s.lookHold = LOOK_HOLD;
-    s.wasBusy = busy;
-    s.lookHold = Math.max(0, s.lookHold - dt);
-    s.look = THREE.MathUtils.lerp(s.look, busy || s.lookHold > 0 ? 1 : 0, 0.08);
+    // The database step takes ~0.15 s; the hero holds the pose ~2 s, about as long as "জি, দেখছি".
+    const busy = inCall && (v?.busyUntil ?? 0) > performance.now();
+    s.look = THREE.MathUtils.lerp(s.look, busy ? 1 : 0, 0.08);
     vrm.lookAt?.applier.applyYawPitch(0, -s.look * 15); // eyes down too (this model moves eye bones)
 
     // --- head follows the cursor; small nods while listening on a call

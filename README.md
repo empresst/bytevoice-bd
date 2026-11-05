@@ -7,6 +7,7 @@ A working demo of StrategyByte's ByteVoice for Bangladesh: a landing page with a
 | Landing page + Bangla caller | https://bytevoice-bd.vercel.app |
 | Clinic portal | https://bytevoice-bd.vercel.app/portal (reviewer login is in the submission email) |
 | Video overview (3 min) | _in the submission email_ |
+| Decisions and testing | [docs/DECISIONS.md](docs/DECISIONS.md) · every guard: [docs/GUARDS.md](docs/GUARDS.md) |
 
 The demo clinic is **রাকিব ডেন্টাল কেয়ার (Rakib Dental Care), Dhanmondi**: three doctors, eight services, Saturday–Thursday chambers, closed on Friday. All clinic, doctor and patient data is fictional.
 
@@ -141,7 +142,9 @@ Deploy: `lk agent create --project <project> --secrets-file … --region ap-sout
 
 ## Honest limitations
 
-- **Phone numbers spoken in Bangla words** are recognised less reliably than English digits (the agent listens in English during that step). If the number fails twice it offers a staff callback instead of looping.
+- **Correcting one digit** ("শেষেরটা ওয়ান হবে") isn't understood: the caller has to say the whole number again. After a few failed tries the agent offers a staff callback instead of looping.
+- **Rare names** can still be misspelt; the read-back catches most, and unconfirmed names are flagged for staff.
+- **Demo calls stop at 5 minutes** to protect the free credits.
 - **Latency is about 2 s** per reply on free models; a paid real-time model or a turn detector trained on Bangla would cut the end-of-speech wait.
 - **Free tiers:** Cartesia's free plan covers about 20 minutes of speech a month and LiveKit Inference about $2.50 of LLM credit; both fall back automatically (Azure voice, Groq LLM) when exhausted.
 - Lip movement on the 3D avatar is driven by "agent is speaking" plus audio level, not true phoneme lip-sync.
@@ -150,4 +153,4 @@ Deploy: `lk agent create --project <project> --secrets-file … --region ap-sout
 
 ## Credits
 
-3D character: *Sakurada Fumiriya* by pixiv (VRoid), used under its VRoid Hub licence (free use, credit not required). Everything else is original or open-source; see [docs/CREDITS.md](docs/CREDITS.md). Every guard and corner case is listed in [docs/GUARDS.md](docs/GUARDS.md). Code was written with help from Claude (Anthropic); I can explain every part of it.
+3D character: *Sakurada Fumiriya* by pixiv (VRoid), used under its VRoid Hub licence (free use, credit not required). Everything else is original or open-source; see [docs/CREDITS.md](docs/CREDITS.md). Every guard and corner case is listed in [docs/GUARDS.md](docs/GUARDS.md). What I decided and how each choice was tested: [docs/DECISIONS.md](docs/DECISIONS.md). Code was written with help from Claude (Anthropic); I can explain every part of it.
