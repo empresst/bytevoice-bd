@@ -56,7 +56,7 @@ flowchart LR
 2. The agent joins, inserts a `calls` row, and greets in Bangla. Every spoken line is written to `transcript_turns` as it happens, so a live call shows up in the portal immediately.
 3. Bookings go through **Postgres functions** (`book_appointment`, `reschedule_appointment`, `cancel_appointment`, `find_appointments`, `available_slots`), so the rules live in one place and each change is a single transaction. Every tool call is logged in `tool_invocations`.
 4. When the caller hangs up, one LLM request turns the transcript into JSON (intent, names in Bangla and English, phone, reason, preferred time, outcome, flags, summaries, line-by-line English translation). It is validated with Pydantic and Postgres checks before it is stored in `call_extractions`.
-5. The portal (Supabase Auth + row-level security) updates live through Supabase Realtime; the landing page's slot board refreshes when the call ends.
+5. The portal (Supabase Auth + row-level security) updates live through Supabase Realtime; the landing page's slot board updates mid-call as soon as the agent books, moves or cancels.
 
 ## Why these providers
 
@@ -75,8 +75,8 @@ The tests and numbers behind each choice are in [docs/DECISIONS.md](docs/DECISIO
 
 ## Making it sound Bangladeshi, not Kolkata
 
-- **Voice:** Bangladeshi-trained voices only (Cartesia, Azure `bn-BD`).
-- **Prompt written in Bangla**, with Dhaka-style example replies and a list of words to avoid (নমস্কার, জল, স্নান, আজ্ঞে → আসসালামু আলাইকুম, পানি, গোসল, জি). Models copy the register of their instructions, so English instructions produced translated-sounding Bangla.
+- **Voice:** Bangladeshi-trained voices only (Azure `bn-BD` in the live demo, Cartesia as the alternative).
+- **Prompt written in Bangla**, with Dhaka-style example replies and a list of words to avoid (জল, স্নান, আজ্ঞে → পানি, গোসল, জি). The opening greeting is always আসসালামু আলাইকুম; a caller who says নমস্কার gets নমস্কার back and "ভালো থাকবেন" at the end. Models copy the register of their instructions, so English instructions produced translated-sounding Bangla.
 - **Safety net in code** (`agent/src/bangla.py`): those words are swapped before speech; `ডা.` is read as "ডাক্তার"; for Azure only, "সাড়ে পাঁচটা" is said as "পাঁচটা তিরিশে" because that voice mispronounces সাড়ে.
 - **Times, dates and phone numbers are generated in code** ("রবিবার, ৮ নভেম্বর, বিকাল সাড়ে পাঁচটা", "শূন্য এক সাত এক দুই, তিন চার পাঁচ…"), so the LLM never formats or reads digits itself.
 - English words are mixed in the way Dhaka speakers do: appointment, slot, scaling, root canal.
@@ -84,10 +84,12 @@ The tests and numbers behind each choice are in [docs/DECISIONS.md](docs/DECISIO
 ## Conversation behaviour
 
 - Greeting → service → day and time (resolves "আগামী রবিবার বিকালে" from a calendar in the prompt; Friday is closed) → real free slots from the database → name, confirmed back → mobile number (said in parts is fine; read back digit by digit) → **full summary and "ঠিক আছে?" before booking** → confirmation → goodbye.
-- Reschedule and cancel look the appointment up by phone, and the database checks the phone owns it.
+- **Doctors' chamber days are checked first:** when a caller names a day, the agent checks that a doctor for that treatment sits then before asking the time ("সোমবার রুট ক্যানেল হয় না; ডাক্তার নুসরাত জাহান রবিবার, মঙ্গলবার… বসেন").
+- Reschedule and cancel look the appointment up by phone, and the database checks the phone owns it; cancelling never asks for a reason.
 - **No medical advice:** declines and offers an appointment or a staff callback. Emergencies (bleeding, swelling, fever) → go to a hospital now, and an `emergency` callback is created.
 - **Off-topic questions** (weather, cricket, politics) are politely declined; asked who it is, it says honestly that it is the clinic's AI assistant. Repeated pranks or abuse → one warning, then it ends the call.
 - Silence → "হ্যালো, আপনি কি শুনতে পাচ্ছেন?", then a polite hang-up. Calls are capped at 5 minutes.
+- After "আল্লাহ হাফেজ" the line stays open 4 s: if the caller says anything, the conversation carries on.
 - Interruptions: speaking over the agent stops it; short sounds like "জি"/"হুঁ" don't.
 
 ## Data model
@@ -109,6 +111,20 @@ The tests and numbers behind each choice are in [docs/DECISIONS.md](docs/DECISIO
 - **Families share phones in Bangladesh,** so a patient is matched on phone *and* name.
 - Times are stored in UTC and shown in Asia/Dhaka.
 - The extraction is not trusted blindly: invalid fields are dropped and listed in `validation_errors`, and an outcome of *booked* only counts if a booking actually happened in the database.
+
+## Clinic portal
+
+What a receptionist sees after the AI has handled calls. Read-only for the reviewer account (row-level security); times in Dhaka; pages update live while a call is in progress.
+
+| Page | What it shows |
+|---|---|
+| **Dashboard** | Last 7 days at a glance: calls, bookings, open callbacks, average call length and reply time, interruptions handled, outcome breakdown, upcoming appointments, latest calls |
+| **Calls** | Every call, newest first; search by name or phone, filter by outcome (booked, rescheduled, cancelled, enquiry, follow-up needed, incomplete, spam), flag (off-topic, medical question, emergency, abuse…) and date range |
+| **Call detail** | Summary in Bangla and English; extracted fields (intent, patient, phone, reason for visit, preferred time, needs-human, flags, sentiment, confidence); call quality (reply times, voice and model used, recognition restarts); appointments changed in the call; every action the AI took with its input and result; the full transcript with an English translation of each line |
+| **Appointments** | Upcoming or all (including cancelled and past), filter by doctor; each shows patient, phone, service and fee, doctor, status, its history (booked → rescheduled → cancelled) and a link to the call that made it |
+| **Callbacks** | Requests the AI is not allowed to handle (medical questions, complaints, emergencies, unclear numbers), with the reason and number; staff mark them done |
+| **Patients** | One record per person; families sharing a phone get separate records (matched on phone **and** name); calls and appointments per patient, first seen |
+| **Data model** | Every table, its purpose, key columns and relationships with live row counts, and a link to the full schema |
 
 ## Measured call quality
 

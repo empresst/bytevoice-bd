@@ -18,6 +18,6 @@
 
 **Portal** — login, dashboard, searchable/filterable calls, call detail (fields, transcript, AI actions, call quality), appointments, callbacks, patients, data-model page, live updates.
 
-**Quality** — 14 unit tests, database tests, scripted live-audio test calls against the deployed agent for every flow, linters clean, no secrets in git.
+**Quality** — 16 unit tests, database tests, scripted live-audio test calls against the deployed agent for every flow, linters clean, no secrets in git.
 
 Details: [README](../README.md) · decisions and how they were checked: [DECISIONS.md](DECISIONS.md) · every guard: [GUARDS.md](GUARDS.md) · credits: [CREDITS.md](CREDITS.md)

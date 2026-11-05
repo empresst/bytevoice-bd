@@ -81,7 +81,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 
 | Case | What happens | Where |
 |---|---|---|
-| Sounding Kolkata | Bangladeshi-trained voices only (Cartesia, Azure `bn-BD`); Bangla prompt with Dhaka examples and a banned-word list | Prompt + voice config |
+| Sounding Kolkata | Bangladeshi-trained voices only (Azure `bn-BD` live, Cartesia as the alternative); Bangla prompt with Dhaka examples and a banned-word list | Prompt + voice config |
 | Kolkata words slip through (জল, স্নান, নিমন্ত্রণ, জলখাবার, আজ্ঞে) | Replaced with Dhaka words just before speech; whole words only ("জলদি" untouched) | Agent `dhaka_words` |
 | Caller greets with "নমস্কার" | The agent answers "নমস্কার" and says "ভালো থাকবেন" instead of "আল্লাহ হাফেজ" at the end; it never says নমস্কার on its own, and the opening greeting stays আসসালামু আলাইকুম | Prompt |
 | Caller speaks English | Understands, always answers in Bangla, including the goodbye | Prompt |
@@ -163,7 +163,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 
 ## 10. How these were checked
 
-- **Unit tests** (`agent/tests`, `uv run pytest`): spoken-number parsing, phone read-back, Bangla times/dates, word fixes, Azure rewrite, extraction aliases and name validation.
+- **Unit tests** (`agent/tests`, `uv run pytest`): spoken-number parsing, phone read-back, Bangla times/dates, word fixes, Azure and Cartesia rewrites, the "তারিখ কি বার" fix, silence dither (including its cost), extraction aliases and name validation.
 - **Database tests** (run inside a rolled-back transaction): phone normalisation, slots, double booking (including a forced overlapping insert), invalid phone, family members, find by Bangla-digit phone, reschedule frees the old slot, cancel with the wrong phone, event history.
 - **Conversation sweep** (17 scripted calls through `lk agent debugger`): evening/relative dates, Friday, past date, wrong doctor for a service, fees and hours, address and payment, parking, emergency, medicine, off-topic, prank, English caller, human request, cancel with no booking, reschedule, code-switching, changing mind. Four failures were found and fixed (announce-without-checking, doctor/service mapping, parking, human handover).
 - **RLS checks** run as the reviewer and as an anonymous user.
