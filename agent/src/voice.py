@@ -24,7 +24,7 @@ DEFAULT_CONN_OPTIONS = APIConnectOptions()
 
 # Words the recogniser should listen out for (doctor names, services, local terms).
 KEYTERMS = [
-    "appointment", "scaling", "root canal", "filling", "braces", "check-up",
+    "appointment", "scaling", "root canal", "filling", "braces", "check-up", "slot", "স্লট", "খালি", "ফাঁকা",
     "তানভীর", "ফারহানা", "নুসরাত", "রাকিব", "ধানমন্ডি", "বিকাশ",
 ]
 
