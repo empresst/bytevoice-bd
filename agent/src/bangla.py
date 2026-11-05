@@ -103,6 +103,17 @@ def dhaka_words(text: str) -> str:
 _SARE_RE = re.compile(r"সাড়ে\s+([ঀ-৿]+?)টা")
 
 
+# Cartesia reads Bangla script well but stumbles on an English word glued to a Bangla
+# ending ("appointment-টা"), so for Cartesia only: "appointment-টা" -> "অ্যাপয়েন্টমেন্টটা".
+# (Azure is the opposite: it reads the English word better, so it keeps it.)
+_APPT_RE = re.compile(r"appointments?-?", re.IGNORECASE)
+_LATIN_SUFFIX_RE = re.compile(r"(?<=[A-Za-z])-(?=[ঀ-৿])")  # "slot-টা" -> "slot টা"
+
+
+def cartesia_pronunciation(text: str) -> str:
+    return _LATIN_SUFFIX_RE.sub(" ", _APPT_RE.sub("অ্যাপয়েন্টমেন্ট", text))
+
+
 def azure_pronunciation(text: str) -> str:
     return _SARE_RE.sub(r"\1টা তিরিশে", text)
 

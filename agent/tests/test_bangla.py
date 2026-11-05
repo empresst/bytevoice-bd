@@ -72,3 +72,9 @@ def test_dhaka_words_replaces_whole_words_only():
 def test_azure_pronunciation_rewrites_sare():
     assert azure_pronunciation("বিকাল সাড়ে পাঁচটা") == "বিকাল পাঁচটা তিরিশে"
 
+
+
+def test_cartesia_gets_appointment_in_bangla_script():
+    from bangla import cartesia_pronunciation
+    assert cartesia_pronunciation("আপনার appointment-টা বুক হয়ে গেছে") == "আপনার অ্যাপয়েন্টমেন্টটা বুক হয়ে গেছে"
+    assert cartesia_pronunciation("কোনো Appointment লাগবে? slot-টা খালি") == "কোনো অ্যাপয়েন্টমেন্ট লাগবে? slot টা খালি"

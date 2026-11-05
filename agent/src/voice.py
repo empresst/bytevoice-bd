@@ -16,7 +16,7 @@ from livekit.agents import APIConnectOptions, inference, llm, stt, tts
 from livekit.agents.tts import ChunkedStream
 from livekit.plugins import azure, cartesia, deepgram, elevenlabs, groq
 
-from bangla import azure_pronunciation
+from bangla import azure_pronunciation, cartesia_pronunciation
 from names import COMMON_NAMES
 
 logger = logging.getLogger("agent.voice")
@@ -146,15 +146,39 @@ class AzureBanglaTTS(tts.TTS):
         await self._inner.aclose()
 
 
+class CartesiaBanglaTTS(tts.TTS):
+    """Cartesia fed whole sentences (not word pieces as the LLM writes them, which made
+    it stutter on "appointment-টা"), with Bangla-script fixes applied first."""
+
+    def __init__(self, inner: cartesia.TTS) -> None:
+        self._inner = inner
+        super().__init__(capabilities=tts.TTSCapabilities(streaming=False),
+                         sample_rate=inner.sample_rate, num_channels=inner.num_channels)
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    @property
+    def provider(self) -> str:
+        return "cartesia"
+
+    def synthesize(self, text: str, *, conn_options: APIConnectOptions = DEFAULT_CONN_OPTIONS) -> ChunkedStream:
+        return self._inner.synthesize(cartesia_pronunciation(text), conn_options=conn_options)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
 def _make_tts(name: str) -> tts.TTS | None:
     try:
         if name == "cartesia":
-            return cartesia.TTS(
+            return CartesiaBanglaTTS(cartesia.TTS(
                 model=os.getenv("CARTESIA_MODEL", "sonic-3"),
                 voice=os.environ["CARTESIA_VOICE_ID"],
                 language="bn",
                 word_timestamps=False,  # only supported for a few languages
-            )
+            ))
         if name == "elevenlabs":
             return elevenlabs.TTS(
                 model=os.getenv("ELEVENLABS_MODEL", "eleven_v3_conversational"),
