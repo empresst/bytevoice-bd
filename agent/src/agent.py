@@ -183,7 +183,18 @@ class Receptionist(Agent):
     async def end_call(self, context: RunContext) -> None:
         """End the call. Say your Bangla goodbye BEFORE calling this; nothing is spoken after it.
         The line stays open a few seconds in case the caller still says something."""
-        token = self.hangup_token = object()
+        self.hangup_token = object()
+        if self.session.agent_state == "listening":  # goodbye already finished playing
+            self.start_hangup_grace()
+        return None  # no reply: the goodbye was already said
+
+    def start_hangup_grace(self) -> None:
+        """Called when the agent is back to listening after end_call (goodbye played, or none).
+        Timed from the audio, not the speech step, which can finish seconds later."""
+        token = self.hangup_token
+        if token is None or getattr(self, "_grace_for", None) is token:
+            return
+        self._grace_for = token
 
         async def after_grace() -> None:
             await asyncio.sleep(HANGUP_GRACE)
@@ -191,9 +202,7 @@ class Receptionist(Agent):
                 self.state.end_reason = "agent_goodbye"
                 hang_up(self.session, "agent_goodbye")
 
-        # Start the grace period once the goodbye has finished playing.
-        context.speech_handle.add_done_callback(lambda _: fire(after_grace()))
-        return None  # no reply: the goodbye was already said
+        fire(after_grace())
 
     def cancel_hangup(self) -> None:
         """The caller spoke after the goodbye: stay on the line and carry on."""
@@ -540,6 +549,10 @@ async def entrypoint(ctx: JobContext) -> None:
     def on_agent_state(ev) -> None:
         if ev.new_state == "speaking":
             heard["agent_spoke"] = True
+        elif ev.new_state == "listening":  # after a goodbye, or after a silent end_call
+            agent = session.current_agent
+            if isinstance(agent, Receptionist):
+                agent.start_hangup_grace()  # no-op unless end_call is pending
 
     async def check_stall(speech_start: float) -> None:
         nonlocal stalls
