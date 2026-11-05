@@ -8,7 +8,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 type Turn = { seq: number; speaker: "agent" | "caller" | "system"; text_bn: string; text_en: string | null; offset_ms: number; interrupted: boolean; response_ms: number | null };
-type Quality = { turns?: number; avg_response_ms?: number | null; max_response_ms?: number | null; avg_end_of_turn_ms?: number | null; avg_llm_first_token_ms?: number | null; avg_tts_first_audio_ms?: number | null; interruptions?: number; llm_models?: string[]; tts_providers?: string[] };
+type Quality = { turns?: number; avg_response_ms?: number | null; max_response_ms?: number | null; avg_end_of_turn_ms?: number | null; avg_llm_first_token_ms?: number | null; avg_tts_first_audio_ms?: number | null; interruptions?: number; stt_restarts?: number; llm_models?: string[]; tts_providers?: string[] };
 const sec = (ms?: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`);
 type Tool = { id: number; tool_name: string; args: Record<string, unknown>; result: Record<string, unknown>; ok: boolean; duration_ms: number | null; created_at: string };
 
@@ -103,6 +103,7 @@ export default async function CallDetail({ params }: { params: Promise<{ id: str
               ["Interruptions handled", q.interruptions ?? 0],
               ["LLM used", (q.llm_models ?? []).join(", ") || "—"],
               ["Voice used", (q.tts_providers ?? []).join(", ") || "—"],
+              ...(q.stt_restarts ? [["Speech recognition", <span key="s" className="text-amber-700">Azure stalled {q.stt_restarts}× — fresh session started, caller asked to repeat</span>] as [string, React.ReactNode]] : []),
             ];
             return (
               <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">

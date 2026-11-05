@@ -39,7 +39,7 @@ import db  # noqa: E402  (needs env loaded first)
 from bangla import DIGIT_WORDS, dhaka_words, say_datetime, say_phone, spoken_digits  # noqa: E402
 from extraction import extract_and_store  # noqa: E402
 from prompt import build_prompt  # noqa: E402
-from voice import build_llm, build_stt, build_tts  # noqa: E402
+from voice import build_llm, build_stt, build_tts, dither_silence, restart_stalled_azure  # noqa: E402
 
 logger = logging.getLogger("agent")
 
@@ -56,10 +56,14 @@ logging.basicConfig(level=logging.INFO)
 DHAKA = ZoneInfo("Asia/Dhaka")
 AGENT_NAME = os.getenv("AGENT_NAME", "bytevoice-bd")
 MAX_CALL_SECONDS = int(os.getenv("MAX_CALL_DURATION_SECONDS", "300"))
-PARTS_OF_DAY = {"morning": (0, 12), "afternoon": (12, 17), "evening": (17, 24)}
+# Same bands as bangla.part_of_day(), so a slot offered for "বিকাল" is also spoken as বিকাল.
+PARTS_OF_DAY = {"morning": (0, 12), "noon": (12, 15), "afternoon": (15, 18), "evening": (18, 24)}
 BN_TO_ASCII = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 # (min, max) seconds of silence before the caller's turn counts as finished.
 NORMAL_PAUSE = (0.8, 3.0)
+# Recognition watchdog: speech this long with no transcript this long after it ends = a stall.
+MIN_STALL_SPEECH = 1.0
+STALL_WAIT = 2.5
 PHONE_PAUSE = (2.0, 5.0)  # people read numbers in chunks: 01712 ... 345 ... 678
 
 ServiceCode = Literal["checkup", "scaling", "filling", "root_canal", "extraction",
@@ -74,6 +78,7 @@ class CallQuality:
         self.last_user_stop: float | None = None
         self.response, self.eot, self.ttft, self.ttfb = [], [], [], []
         self.interruptions = 0
+        self.stt_restarts = 0  # Azure recognition stalled and was replaced by a fresh session
         self.llm_models: set[str] = set()
         self.tts_providers: set[str] = set()
 
@@ -114,6 +119,7 @@ class CallQuality:
             "avg_llm_first_token_ms": avg(self.ttft),
             "avg_tts_first_audio_ms": avg(self.ttfb),
             "interruptions": self.interruptions,
+            "stt_restarts": self.stt_restarts,
             "llm_models": sorted(self.llm_models),
             "tts_providers": sorted(self.tts_providers),
         }
@@ -158,6 +164,15 @@ class Receptionist(Agent):
         self.session.update_options(min_endpointing_delay=pause[0], max_endpointing_delay=pause[1])
         logger.info("phone mode %s", "on" if on else "off")
 
+    async def stt_node(self, audio, model_settings):
+        """Caller audio -> speech recognition, with exact-silence frames dithered (see dither_silence)."""
+        async def dithered():
+            async for frame in audio:
+                yield dither_silence(frame)
+
+        async for ev in Agent.default.stt_node(self, dithered(), model_settings):
+            yield ev
+
     async def on_enter(self) -> None:
         await self.session.say(
             "আসসালামু আলাইকুম, রাকিব ডেন্টাল কেয়ার থেকে বলছি। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?",
@@ -199,7 +214,7 @@ class Receptionist(Agent):
         context: RunContext,
         date_iso: Annotated[str, Field(description="Date as YYYY-MM-DD, resolved from the calendar in your instructions")],
         service_code: ServiceCode,
-        part_of_day: Annotated[Literal["any", "morning", "afternoon", "evening"], Field(description="morning=সকাল, afternoon=দুপুর/বিকাল, evening=সন্ধ্যা/রাত")] = "any",
+        part_of_day: Annotated[Literal["any", "morning", "noon", "afternoon", "evening"], Field(description="morning=সকাল (before 12), noon=দুপুর (12-3), afternoon=বিকাল/বিকেল (3-6), evening=সন্ধ্যা/রাত (after 6)")] = "any",
         preferred_time: Annotated[str | None, Field(description="HH:MM 24h if the caller named a time, e.g. 16:00 for বিকাল চারটা. Call again whenever they ask for a different time.")] = None,
         doctor: Annotated[DoctorCode | None, Field(description="ONLY if the caller named a doctor. Otherwise leave empty to search all doctors.")] = None,
     ) -> dict:
@@ -218,8 +233,14 @@ class Receptionist(Agent):
             code_of = {v: k for k, v in self.doctor_ids.items()}
             lo, hi = PARTS_OF_DAY.get(part_of_day, (0, 24))
             local = [(r, r["starts_at"].astimezone(DHAKA)) for r in rows]
+            none_in_part = False
             if part_of_day != "any" and not preferred_time:
-                local = [(r, t) for r, t in local if lo <= t.hour < hi]
+                in_part = [(r, t) for r, t in local if lo <= t.hour < hi]
+                if in_part:
+                    local = in_part
+                else:  # nothing then: offer the closest times that day instead of an empty list
+                    none_in_part = bool(local)
+                    local.sort(key=lambda x: min(abs(x[1].hour - lo), abs(x[1].hour - (hi - 1))))
             if preferred_time:
                 try:
                     hh, mm = map(int, preferred_time.split(":"))
@@ -233,8 +254,10 @@ class Receptionist(Agent):
                       "doctor": code_of.get(str(r["doctor_id"])), "starts_at": r["starts_at"].isoformat(),
                       "exact_match": bool(preferred_time) and f"{t:%H:%M}" == preferred_time}
                      for r, t in local[:5]]
-            return {"ok": True, "count": len(local), "slots": slots,
-                    "note": "Offer 2-3 (exact_match first). Pass starts_at and doctor unchanged to book_appointment."}
+            note = "Offer 2-3 (exact_match first). Pass starts_at and doctor unchanged to book_appointment."
+            if none_in_part:
+                note = "Nothing free in the part of day the caller asked for; say so, then offer these nearest times. " + note
+            return {"ok": True, "count": len(local), "slots": slots, "none_in_requested_part": none_in_part, "note": note}
         return await self._run("check_availability", {"date": date_iso, "service": service_code, "part_of_day": part_of_day,
                                                       "preferred_time": preferred_time, "doctor": doctor}, go())
 
@@ -414,8 +437,9 @@ async def entrypoint(ctx: JobContext) -> None:
     profile = await db.clinic_profile()
     now = datetime.now(DHAKA)
 
+    stt_chain, azure_stt = build_stt()
     session = AgentSession(
-        stt=build_stt(),
+        stt=stt_chain,
         llm=build_llm(),
         tts=build_tts(),
         vad=ctx.proc.userdata["vad"],
@@ -447,8 +471,43 @@ async def entrypoint(ctx: JobContext) -> None:
         fire(db.add_turn(call_id, state.seq, "caller" if role == "user" else "agent",
                          text, offset, interrupted, response_ms))
 
+    # --- recognition watchdog: the voice detector heard the caller, but no text came back.
+    # A stalled recogniser raises no error, so the FallbackAdapter can't see it; we replace the
+    # Azure session and ask the caller to repeat. Only event bookkeeping on the normal path.
+    heard = {"speech_start": 0.0, "last_text": 0.0, "agent_spoke": False}
+    stalls = 0
+
+    @session.on("user_input_transcribed")
+    def on_transcript(ev) -> None:
+        heard["last_text"] = time.monotonic()
+
+    @session.on("agent_state_changed")
+    def on_agent_state(ev) -> None:
+        if ev.new_state == "speaking":
+            heard["agent_spoke"] = True
+
+    async def check_stall(speech_start: float) -> None:
+        nonlocal stalls
+        await asyncio.sleep(STALL_WAIT)
+        if heard["last_text"] >= speech_start or heard["speech_start"] != speech_start:
+            return  # text arrived, or the caller is already speaking again
+        stalls += 1
+        restarted = restart_stalled_azure(azure_stt)
+        state.quality.stt_restarts += int(restarted)
+        logger.warning("speech heard but no transcript (stall %d)%s", stalls,
+                       "; restarted the Azure session" if restarted else "")
+        if stalls <= 2:
+            session.say("দুঃখিত, আবার একটু বলবেন?", allow_interruptions=True)
+
     @session.on("user_state_changed")
     def on_user_state(ev) -> None:
+        now_t = time.monotonic()
+        if ev.new_state == "speaking":
+            heard["speech_start"], heard["agent_spoke"] = now_t, False
+        # Skip short sounds (cough, "হুঁ") and anything said over the agent (echo, backchannel).
+        elif (ev.old_state == "speaking" and ev.new_state == "listening"
+              and now_t - heard["speech_start"] >= MIN_STALL_SPEECH and not heard["agent_spoke"]):
+            fire(check_stall(heard["speech_start"]))
         if ev.new_state == "away":
             fire(handle_silence())
 

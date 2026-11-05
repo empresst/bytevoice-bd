@@ -25,10 +25,15 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Agent claims "বুক হয়ে গেছে" before booking | Forbidden until the booking tool succeeds | Prompt |
 | No name given | `name_required`; the prompt requires asking and confirming the full name | DB + Prompt |
 | Reschedule / cancel someone else's appointment | Functions require the phone the appointment was booked with → `appointment_not_found` | DB |
+| Caller doesn't remember which number they booked with | Asks once for another number, then records a staff callback to match it up | Prompt |
 | Cancel/reschedule when no appointment exists | `find_appointments` returns an empty list; the agent says so | DB + Agent |
 | Reschedule keeps the same service length and doctor; the old slot is freed | `reschedule_appointment` + exclusion constraint ignoring itself | DB |
 | History is never lost | Every booking, reschedule and cancellation is written to `appointment_events` with old/new time and the call that did it | DB |
 | Each booking/cancel is all-or-nothing | Postgres functions run in one transaction | DB |
+| Booking for someone else ("আমার আম্মার জন্য", a child) | Asks for the **patient's** name ("আপনার আম্মার পুরো নামটা বলবেন?") and a contact number; who booked goes in the appointment notes | Prompt |
+| Two people in one call | After the first booking, the time, name and confirmation steps run again for the second | Prompt |
+| "সাতটায়" without morning/evening | Resolved from the clinic's hours (taken as সন্ধ্যা সাতটা in a test) | Prompt + calendar |
+| "বিকেলে" offered noon slots | Parts of day use the same bands everywhere: সকাল <12, দুপুর 12–3, বিকাল 3–6, সন্ধ্যা/রাত 6+; if nothing is free then, the nearest times that day are offered and the caller is told | Agent `PARTS_OF_DAY` |
 | Families share one phone (common in Bangladesh) | Patients are matched on phone **and** name, so a sibling gets their own record | DB `book_appointment` |
 | Preparation before a visit | Root canal and extraction carry prep notes (e.g. bring old X-rays, don't come on an empty stomach), said after booking | DB seed + Prompt |
 
@@ -58,6 +63,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Medicine / diagnosis questions | Politely declined ("ডাক্তারই বলতে পারবেন"), offers an appointment or callback | Prompt |
 | Emergency (heavy bleeding, swelling, fever, breathing trouble) | Tells the caller to go to a hospital emergency now and records an `emergency` callback | Prompt + `request_callback` |
 | Caller wants a human / the doctor / has a complaint or billing issue | "আমাদের টিম আপনাকে ফোন করবে", takes reason and number, records a callback for staff | Prompt + `callbacks` |
+| Doctor's or staff's personal mobile, home address | Never given; offers an appointment, or a staff callback if urgent (tested) | Prompt |
 | Off-topic (weather, cricket, politics, other businesses) | One polite sentence, back to the appointment; never answered | Prompt |
 | "তুমি কে?" / "তুমি কি মানুষ?" | Honest: "আমি রাকিব ডেন্টাল কেয়ারের AI সহকারী…" | Prompt |
 | Pranks or abuse | One polite warning, then goodbye and `end_call` | Prompt |
@@ -87,6 +93,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Waiting on the database | Instant "জি, একটু দেখছি…" / "জি, বুক করছি…" — skipped if the agent just said something similar | Agent `_ack` |
 | Slow replies | Reply drafting starts while the end of speech is confirmed (preemptive generation) | Agent session |
 | Silence | After ~12 s: "হ্যালো, আপনি কি শুনতে পাচ্ছেন?"; then a polite hang-up | Agent `handle_silence` |
+| Pauses sent as exact digital silence (synthetic test callers, some noise suppressors) | All-zero frames get inaudible ±1 noise before recognition; Azure missed the next sentence in 2 of 3 such calls without it, 0 of 3 with it. Cost 2 µs per 10 ms frame | Agent `dither_silence` |
+| Recogniser goes quiet mid-call (no error, so no automatic fallback) | Watchdog: ≥1 s of speech heard by the voice detector, no text 2.5 s later → the Azure session is replaced (new one in ~0.1 s) and the caller is asked "দুঃখিত, আবার একটু বলবেন?" (max twice). Shown in the portal's Call quality box | Agent `restart_stalled_azure` + session events |
 | Measuring all of this | Per-reply response time, end-of-speech wait, first LLM token, first audio, interruptions and models used are stored and shown in the portal | Agent `CallQuality` + DB `calls.quality` |
 
 ## 6. Reliability
@@ -94,6 +102,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Case | What happens | Where |
 |---|---|---|
 | LLM down or rate-limited | Fallback chain: Gemma 4 → Groq gpt-oss-120b → Groq qwen | Agent `voice.py` |
+| Speech recognition provider down | Azure → Deepgram (`STT_ORDER`, switchable without a code change) | Agent `voice.py` |
 | Voice provider down or out of credit | Fallback between Cartesia and Azure, mid-call | Agent `voice.py` |
 | A tool errors or hangs | 8 s timeout; a friendly Bangla message and an offer for staff to call back; never raises into the LLM | Agent `_run` |
 | Every tool call | Logged with input, output, success and duration (`tool_invocations`) | Agent + DB |
@@ -124,7 +133,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Staff seeing other clinics | Policies limit reads to `current_staff_clinic()` | DB |
 | Portal users changing bookings or calling booking functions | No update policies except closing callbacks; `execute` on booking functions revoked from portal roles (tested: 0 rows / permission denied) | DB |
 | Public slot board leaking patients | `/api/availability` returns only doctor, time and booked/free | Web |
-| Someone spamming the call button | 5 calls/hour per visitor, stored in Postgres; IP kept only as a salted hash | Web `/api/call` |
+| Someone spamming the call button | 20 calls/hour per visitor (enough for a team testing from one office network), stored in Postgres; IP kept only as a salted hash | Web `/api/call` |
 | Tokens reused | 10-minute, room-scoped token; a new room per call (dispatch happens on room creation) | Web `/api/call` |
 | Secrets | Never in git (`.env*` ignored, staged diffs scanned before every commit); agent secrets in LiveKit, web secrets in Vercel | Repo + hosting |
 | Recordings | Not stored (privacy by default) | — |
@@ -152,7 +161,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 
 ## Known gaps
 
-- Numbers spoken as Bangla words during the phone step are recognised less reliably than English digits.
+- Rare names can still be misspelt (e.g. সুমাইয়া); the read-back catches it, and after two failed corrections the call is flagged `name_unconfirmed`.
+- Azure's free tier is 5 h of recognition a month; after that Deepgram takes over.
 - About 2 s per reply on free models.
 - Lip movement follows "agent is speaking" and audio level, not phonemes.
 - No SMS confirmation, clinic-software integration or multi-clinic onboarding.

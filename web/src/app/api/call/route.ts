@@ -8,7 +8,7 @@ import { sql } from "@/lib/db";
 // room, with the Bangla agent dispatched into it when the room is created.
 
 const AGENT_NAME = process.env.LIVEKIT_AGENT_NAME ?? "bytevoice-bd";
-const MAX_PER_HOUR = Number(process.env.RATE_LIMIT_PER_IP_PER_HOUR ?? 5);
+const MAX_PER_HOUR = Number(process.env.RATE_LIMIT_PER_IP_PER_HOUR ?? 20);
 
 function ipHash(req: NextRequest): string {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";

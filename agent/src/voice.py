@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import os
 
+import numpy as np
+from livekit import rtc
 from livekit.agents import APIConnectOptions, inference, llm, stt, tts
 from livekit.agents.tts import ChunkedStream
 from livekit.plugins import azure, cartesia, deepgram, elevenlabs, groq
@@ -27,8 +29,9 @@ KEYTERMS = [
 ]
 
 
-def build_stt() -> stt.STT:
-    """Azure bn-BD first, Deepgram as the fallback.
+def build_stt() -> tuple[stt.STT, azure.STT | None]:
+    """Azure bn-BD first, Deepgram as the fallback. Also returns the Azure
+    instance (if used) so the agent can restart its session when it stalls.
 
     On the same 50 synthetic name clips Azure got 44 names exactly right and
     Deepgram 38; with the common-names phrase list Azure got 48. Deepgram's
@@ -36,13 +39,13 @@ def build_stt() -> stt.STT:
     Azure bn-BD also handles phone numbers spoken in Bangla, English or mixed,
     so the language never has to change mid-call.
     """
-    return stt.FallbackAdapter([
-        azure.STT(
+    makers = {
+        "azure": lambda: azure.STT(
             language="bn-BD",
             phrase_list=KEYTERMS + COMMON_NAMES,
             segmentation_silence_timeout_ms=500,
         ),
-        deepgram.STT(
+        "deepgram": lambda: deepgram.STT(
             model="nova-3",
             language="bn",
             interim_results=True,
@@ -51,7 +54,52 @@ def build_stt() -> stt.STT:
             endpointing_ms=300,
             keyterm=KEYTERMS,
         ),
-    ])
+    }
+    order = [n.strip() for n in os.getenv("STT_ORDER", "azure,deepgram").split(",") if n.strip() in makers]
+    logger.info("speech-to-text order: %s", order)
+    instances = {n: makers[n]() for n in order}
+    return stt.FallbackAdapter(list(instances.values())), instances.get("azure")
+
+
+def restart_stalled_azure(azure_stt: azure.STT | None) -> bool:
+    """Replace a stalled Azure recognition session with a fresh one.
+
+    A stall isn't an error, so the FallbackAdapter never reacts, and the plugin's
+    own reconnect (update_options) hangs: it waits for Azure to confirm the old
+    session stopped, which a stalled session never does (seen in tests).
+    Marking the session stopped makes the stream raise; its built-in retry opens
+    a new Azure session within ~0.1 s on the same live audio (tested: the next
+    sentence was recognised each time). If Azure keeps failing, the retries run
+    out and the FallbackAdapter moves the call to Deepgram.
+    Uses the plugin's private fields (livekit-plugins-azure 1.8.x, pinned in uv.lock).
+    """
+    stopped = False
+    for stream in list(getattr(azure_stt, "_streams", None) or []):
+        event = getattr(stream, "_session_stopped_event", None)
+        if event is not None:
+            event.set()
+            stopped = True
+    return stopped
+
+
+_DITHER: dict[int, bytes] = {}
+
+
+def dither_silence(frame: rtc.AudioFrame) -> rtc.AudioFrame:
+    """Replace an all-zero frame with inaudible noise (±1 of 32768).
+
+    In tests Azure missed the caller's next sentence 2 times in 3 when the
+    pauses were exact digital silence (what synthetic test callers and some
+    noise suppressors send), and 0 in 3 with faint noise, like a real mic.
+    Frames with any sound are passed through untouched.
+    """
+    samples = np.frombuffer(frame.data, dtype=np.int16)
+    if samples.any() or os.getenv("STT_DITHER", "1") == "0":  # STT_DITHER=0 only for testing the watchdog
+        return frame
+    noise = _DITHER.get(len(samples))
+    if noise is None:
+        noise = _DITHER[len(samples)] = np.random.default_rng(0).integers(-1, 2, len(samples), dtype=np.int16).tobytes()
+    return rtc.AudioFrame(noise, frame.sample_rate, frame.num_channels, frame.samples_per_channel)
 
 
 def build_llm() -> llm.LLM:
