@@ -12,6 +12,12 @@ I built this with Claude Code as a pair programmer. My rule was: nothing goes in
 | **Keep English loanwords as they are in speech** | We tried writing "appointment" in Bangla script for the voice; I listened to both and the Bangla spelling sounded worse, so it was reverted | Side-by-side audio samples |
 | **Call limit 20/hour, not 5** | Reviewers testing from one office share one IP address | — |
 
+## Provider evidence (moved from the README)
+
+- **Speech-to-text:** in a real call Deepgram heard "মকবুল হাসান" as "মুখ ভুল হাসান". On 50 synthetic clips (25 Bangladeshi names × 2 voices, "আমার নাম …") Azure got 44 names exactly right, Deepgram 38, and Azure with the name list 48; Deepgram's misses were often names split into ordinary words ("ফেরদৌস" → "ফের দোষ"). Azure `bn-BD` also got all four phone-number styles right, so recognition no longer switches language for the number. Safeguards: exact-silence audio gets inaudible noise, and a watchdog replaces a stalled session; normal replies measured 2.26 s median after the switch vs 2.38 s before.
+- **LLM:** Groq's free tier allows 8,000 tokens/minute per model and a Bangla prompt is ~2,800 tokens per request, so calls stalled on rate limits; Gemma 4 via LiveKit Inference has no per-minute cap and gave the most natural Bangla of the free models tried. Gemini's free tier was too limited; Cerebras/Mistral free tiers allow only a few requests a minute.
+- **Voice:** Azure's `bn-BD` voices are trained on Bangladeshi speech (Google offers only `bn-IN`); Cartesia "Kian" sounded the most natural in a side-by-side test but its free plan is ~20 minutes a month, so it is the fallback in the live demo. ElevenLabs' Bangladeshi voices are paid-only. Cartesia gets whole sentences (piece-by-piece text made it stutter on "appointment-টা").
+
 ## Problems I found by testing, and what changed
 
 | What I noticed | Root cause | Fix |

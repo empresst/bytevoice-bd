@@ -1,6 +1,6 @@
 # ByteVoice Bangladesh — a Bangla AI receptionist for dental clinics
 
-A working demo of StrategyByte's ByteVoice for Bangladesh: a landing page with a 3D receptionist, a **"Talk to our Bangla caller"** button that starts a live voice call in the browser, a voice agent that speaks everyday Dhaka Bangla and books, reschedules and cancels real appointments, and a portal where clinic staff see every call, its transcript and the structured data it produced.
+A working demo of StrategyByte's ByteVoice for Bangladesh: a live Bangla voice receptionist that books, reschedules and cancels real appointments, a landing page with a 3D receptionist and a live slot board, and a staff portal with every call's transcript and structured data.
 
 | | Link |
 |---|---|
@@ -8,6 +8,8 @@ A working demo of StrategyByte's ByteVoice for Bangladesh: a landing page with a
 | Clinic portal | https://bytevoice-bd.vercel.app/portal (reviewer login is in the submission email) |
 | Video overview (3 min) | https://www.loom.com/share/2bdaedee5a1a4a7f93fb1a71fec8659d |
 | Decisions and testing | [docs/DECISIONS.md](docs/DECISIONS.md) · every guard: [docs/GUARDS.md](docs/GUARDS.md) |
+
+**Stack:** Next.js 16 on Vercel · LiveKit Cloud + LiveKit Agents (Python) · Azure `bn-BD` speech-to-text and voice (Deepgram / Cartesia fallbacks) · Gemma 4 via LiveKit Inference (Groq fallback) · Supabase Postgres 17 (Mumbai).
 
 ## Engineering highlights
 
@@ -20,7 +22,12 @@ A working demo of StrategyByte's ByteVoice for Bangladesh: a landing page with a
 
 The demo clinic is **রাকিব ডেন্টাল কেয়ার (Rakib Dental Care), Dhanmondi**: three doctors, eight services, Saturday–Thursday chambers, closed on Friday. All clinic, doctor and patient data is fictional.
 
-**Try this:** pick a doctor and slot in *আমাদের চিকিৎসকবৃন্দ* on the landing page, press *কল শুরু করুন*, book it by voice, hang up — the slot turns *বুক হয়েছে* on the page and the call appears in the portal with its transcript, English translation and extracted fields. Then call again and cancel it with the same mobile number.
+### Quick evaluation path
+1. Open the [landing page](https://bytevoice-bd.vercel.app) and pick a free slot in *আমাদের চিকিৎসকবৃন্দ* (or just press the call button).
+2. Press **কল শুরু করুন** and allow the microphone. The first call after a quiet period takes about 20 s to connect (free tier waking up).
+3. Book by voice: the receptionist reads back your name, mobile number and the full booking before confirming. The slot turns grey on the page during the call.
+4. Open the [portal](https://bytevoice-bd.vercel.app/portal): the call appears with its transcript, English translation and extracted fields.
+5. Call again with the same mobile number and cancel or move the appointment.
 
 ---
 
@@ -55,14 +62,16 @@ flowchart LR
 
 Everything runs on free tiers. Each choice was tested, not assumed:
 
-| Part | Choice | Why (what was tried) |
+| Part | Choice | Why |
 |---|---|---|
-| Speech-to-text | **Azure `bn-BD`** with a phrase list of ~200 common Bangladeshi names, fallback **Deepgram Nova-3** `bn` | Callers' names were the weak spot: in a real call Deepgram heard "মকবুল হাসান" as "মুখ ভুল হাসান". On 50 synthetic clips (25 Bangladeshi names × 2 voices, "আমার নাম …") Azure got 44 names exactly right, Deepgram 38, and Azure with the name list 48. Deepgram's misses were often names split into ordinary words ("ফেরদৌস" → "ফের দোষ"). Azure `bn-BD` also got phone numbers right in Bangla, English and mixed ("জিরো ওয়ান সেভেন, ডাবল ওয়ান…"), so recognition no longer switches language for the number. A public Bangla benchmark (riverbornai, Sept 2026) ranks Soniox and Sarvam above Deepgram for streaming; both are paid, Azure was free here. Two safeguards: exact-silence audio gets inaudible noise (Azure otherwise sometimes missed the next sentence), and a watchdog replaces a stalled Azure session and asks the caller to repeat. Neither adds to normal reply time (measured: normal replies 2.26 s median vs 2.38 s before the switch). |
-| LLM | **Gemma 4 31B on LiveKit Inference** (free monthly credit), fallback **Groq** `gpt-oss-120b` → `qwen3.8-27b` | Groq's free tier allows 8,000 tokens/minute per model; a Bangla prompt is ~2,800 tokens per request, so calls stalled on 429s. Gemma via LiveKit has no per-minute token cap, ~1s to first token, and the most natural Bangla of the free models tested. Gemini's free tier was too limited; Cerebras/Mistral free tiers allow only a few requests a minute. |
-| Voice | **Cartesia Sonic 3 ("Kian")** and **Azure `bn-BD-PradeepNeural`**, order set by `TTS_ORDER`, each the other's fallback | Azure's `bn-BD` voices are trained on Bangladeshi speech (Google offers only `bn-IN`). Cartesia sounded the most natural in a side-by-side test and streams, so it starts speaking sooner. ElevenLabs' Bangladeshi voices are paid-only. If Cartesia's free credit runs out mid-call, LiveKit's `FallbackAdapter` switches to Azure instead of going silent. |
-| Realtime transport | **LiveKit Cloud** + LiveKit Agents 1.8.10 | WebRTC, interruption handling, agent dispatch and hosting in one place. |
-| Database / auth | **Supabase** Postgres 17, Mumbai | Closest region to Bangladesh, Auth, row-level security and Realtime included. |
-| Web | **Next.js 16** on **Vercel** (Mumbai) | One app for landing page, APIs and portal. |
+| Speech-to-text | **Azure `bn-BD`** + ~200 common Bangladeshi names, fallback **Deepgram Nova-3** | Best on Bangladeshi names in a side-by-side test (48/50 vs 38/50); also handles numbers said in Bangla, English or mixed |
+| LLM | **Gemma 4 31B** on LiveKit Inference, fallback **Groq** | Most natural Bangla of the free models, no per-minute token cap, ~0.9 s to first token |
+| Voice | **Azure `bn-BD-PradeepNeural`** and **Cartesia Sonic 3**, each the other's fallback (`TTS_ORDER`) | Both trained on Bangladeshi speech; the live demo runs Azure first to stay within free limits |
+| Realtime | **LiveKit Cloud** + LiveKit Agents 1.8 | WebRTC, interruptions, agent dispatch and hosting in one place |
+| Database / auth | **Supabase** Postgres 17, Mumbai | Closest region to Bangladesh; auth, row-level security and Realtime included |
+| Web | **Next.js 16** on **Vercel** (Mumbai) | One app for landing page, APIs and portal |
+
+The tests and numbers behind each choice are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Making it sound Bangladeshi, not Kolkata
 
