@@ -84,7 +84,7 @@ def hang_up(session: AgentSession, reason: str) -> None:
     "call ended" straight away instead of sitting in an empty room), then stop the
     agent. Saving and summarising the call runs afterwards in the shutdown callback."""
     job = get_job_context()
-    fire(job.delete_room())
+    job.delete_room()  # starts its own background task
     session.once("close", lambda _ev: job.shutdown(reason=reason))
     session.shutdown()
 
