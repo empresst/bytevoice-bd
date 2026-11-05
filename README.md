@@ -85,6 +85,7 @@ Everything runs on free tiers. Each choice was tested, not assumed:
 
 **Rules enforced by the database, not by the model**
 
+- **Bookings take the treatment's real length:** slots start every 30 minutes, and each service has its own duration (check-up 20 min, scaling/filling/extraction 30 min, root canal/whitening 60 min). A 60-minute booking at 12:00 also closes 12:30 for that doctor; only start times where the whole treatment fits are offered.
 - **No double booking:** an `EXCLUDE USING gist (doctor_id WITH =, tstzrange(starts_at, ends_at) WITH &&) WHERE status = 'scheduled'` constraint — tested by forcing an overlapping insert.
 - **Phone numbers:** `normalize_bd_phone()` accepts Bangla or English digits, `+880`/`880`/`0` prefixes and stores only `+8801[3-9]XXXXXXXX` (CHECK constraint).
 - **Families share phones in Bangladesh,** so a patient is matched on phone *and* name.

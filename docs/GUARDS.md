@@ -11,6 +11,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Case | What happens | Where |
 |---|---|---|
 | Two callers book the same doctor at the same time | Impossible: an `EXCLUDE` constraint rejects any overlapping *scheduled* appointment for a doctor, even under concurrent calls; the agent gets `slot_taken` and offers another time | DB `no_double_booking` |
+| A booking longer than one slot (root canal or whitening, 60 min) | Slots start every 30 min, but a booking blocks the doctor for the service's full length: a 12:00 root canal blocks 12:00–13:00, so 12:30 is not offered, and an 11:30 root canal isn't offered either. A 12:00 check-up (20 min) or scaling (30 min) leaves 12:30 free. Per doctor only. The slot board greys every 30-min block the booking overlaps | DB `available_slots`, exclusion constraint, `/api/availability` |
 | Caller picks a time that isn't a real slot (outside chamber hours, wrong length, already taken) | `book_appointment` re-checks `available_slots()` before inserting → `slot_unavailable` | DB |
 | Caller asks for a time the agent didn't offer ("চারটায় হবে?") | The agent must call `check_availability` again with `preferred_time`; it may never say "খালি নেই" without checking | Prompt + Agent |
 | Agent says "দেখছি" and then stops | Prompt requires the check in the same reply (fixed after a test showed silence) | Prompt |
