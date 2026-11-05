@@ -38,7 +38,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 |---|---|---|
 | Number said in English, Bangla words, digits, or mixed ("জিরো ওয়ান", "শূন্য এক", "০১৭১২", "01712") | Converted to digits **in code**, not by the LLM | Agent `spoken_digits` |
 | "double one", "triple five", "ডাবল", "ট্রিপল" | Expanded | Agent |
-| Deepgram's Bangla model mishears English digits | While collecting the number, speech recognition switches to **English (`en-IN`) with numerals**, then back to Bangla | Agent `phone_mode` |
+| Phone numbers said in Bangla, English or mixed ("জিরো ওয়ান সেভেন, ডাবল ওয়ান") | Azure `bn-BD` keeps the words; `spoken_digits()` turns them (and "double/triple") into digits; longer pauses while the number is being read out | `bangla.spoken_digits`, agent `phone_mode` |
+| Names misheard as ordinary words ("মুখ ভুল হাসান") | Azure phrase list of common Bangladeshi names; the agent reads the name back and waits for a yes, guesses the closest common name when what it heard isn't a name, and after two failed corrections notes its best guess and the call gets a `name_unconfirmed` flag | `voice.build_stt`, `names.py`, prompt step 4, extraction |
 | Number said in parts with pauses | Longer silence allowed while collecting the number (2–5 s instead of 0.8–3 s); parts are joined; "জি" between parts | Agent |
 | Still incomplete after two parts | Reads back once what it has: "এখন পর্যন্ত পেয়েছি …" | Agent |
 | Caller restarts the number ("01…") | Treated as a fresh attempt, never glued to earlier pieces | Agent |

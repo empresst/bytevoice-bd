@@ -17,6 +17,9 @@ COPY . .
 RUN uv run --no-dev src/agent.py download-files
 
 FROM base
+# Azure Speech SDK (speech recognition) needs OpenSSL, CA certificates and ALSA on Linux.
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 ca-certificates libasound2 \
+  && rm -rf /var/lib/apt/lists/*
 ARG UID=10001
 RUN adduser --disabled-password --gecos "" --home /app --shell /sbin/nologin --uid "${UID}" appuser
 COPY --from=build --chown=appuser:appuser /app /app

@@ -26,7 +26,7 @@ flowchart LR
   API -- rate limit, token --> DB[(Supabase Postgres 17<br/>Mumbai ap-south-1)]
   LP <-- WebRTC audio --> LK[LiveKit Cloud]
   LK -- dispatch --> AG[Voice agent, Python<br/>LiveKit Cloud, ap-south]
-  AG -- speech-to-text --> DG[Deepgram Nova-3<br/>bn, en-IN for numbers]
+  AG -- speech-to-text --> DG[Azure bn-BD + name list<br/>fallback: Deepgram Nova-3]
   AG -- LLM --> GM[Gemma 4 31B via LiveKit Inference<br/>fallback: Groq gpt-oss-120b → qwen]
   AG -- text-to-speech --> TT[Cartesia Sonic 3 + Azure bn-BD<br/>each the other's fallback]
   AG -- Postgres functions --> DB
@@ -47,7 +47,7 @@ Everything runs on free tiers. Each choice was tested, not assumed:
 
 | Part | Choice | Why (what was tried) |
 |---|---|---|
-| Speech-to-text | **Deepgram Nova-3**, `bn`; switches to **`en-IN` with numerals while the caller gives a phone number** | Nova-3 streams Bengali. Bangladeshis usually say mobile numbers in English; in a test the Bangla model turned "zero one nine one four…" into `01ননাইনন ফোর…`, the Indian-English model got `01914839144` exactly, including "double one". |
+| Speech-to-text | **Azure `bn-BD`** with a phrase list of ~200 common Bangladeshi names, fallback **Deepgram Nova-3** `bn` | Callers' names were the weak spot: in a real call Deepgram heard "মকবুল হাসান" as "মুখ ভুল হাসান". On 50 synthetic clips (25 Bangladeshi names × 2 voices, "আমার নাম …") Azure got 44 names exactly right, Deepgram 38, and Azure with the name list 48. Deepgram's misses were often names split into ordinary words ("ফেরদৌস" → "ফের দোষ"). Azure `bn-BD` also got phone numbers right in Bangla, English and mixed ("জিরো ওয়ান সেভেন, ডাবল ওয়ান…"), so recognition no longer switches language for the number. A public Bangla benchmark (riverbornai, Sept 2026) ranks Soniox and Sarvam above Deepgram for streaming; both are paid, Azure was free here. |
 | LLM | **Gemma 4 31B on LiveKit Inference** (free monthly credit), fallback **Groq** `gpt-oss-120b` → `qwen3.8-27b` | Groq's free tier allows 8,000 tokens/minute per model; a Bangla prompt is ~2,800 tokens per request, so calls stalled on 429s. Gemma via LiveKit has no per-minute token cap, ~1s to first token, and the most natural Bangla of the free models tested. Gemini's free tier was too limited; Cerebras/Mistral free tiers allow only a few requests a minute. |
 | Voice | **Cartesia Sonic 3 ("Kian")** and **Azure `bn-BD-PradeepNeural`**, order set by `TTS_ORDER`, each the other's fallback | Azure's `bn-BD` voices are trained on Bangladeshi speech (Google offers only `bn-IN`). Cartesia sounded the most natural in a side-by-side test and streams, so it starts speaking sooner. ElevenLabs' Bangladeshi voices are paid-only. If Cartesia's free credit runs out mid-call, LiveKit's `FallbackAdapter` switches to Azure instead of going silent. |
 | Realtime transport | **LiveKit Cloud** + LiveKit Agents 1.8.10 | WebRTC, interruption handling, agent dispatch and hosting in one place. |

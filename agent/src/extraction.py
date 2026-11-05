@@ -39,7 +39,7 @@ class Extraction(BaseModel):
     outcome: Outcome
     needs_human: bool = False
     is_spam: bool = False
-    flags: list[Literal["spam", "abusive", "off_topic", "medical_advice_request", "emergency"]] = []
+    flags: list[Literal["spam", "abusive", "off_topic", "medical_advice_request", "emergency", "name_unconfirmed"]] = []
     sentiment: Literal["positive", "neutral", "negative"] | None = None
     confidence: float = Field(0.5, ge=0, le=1)
     summary_bn: str
@@ -83,6 +83,8 @@ Rules:
 - outcome: one of booked, rescheduled, cancelled, enquiry, follow_up_needed, incomplete, failed, spam.
   Use follow_up_needed if staff must call back; incomplete if the caller left before finishing.
 - is_spam/flags: prank, abuse, or a call with nothing to do with the clinic.
+- name_unconfirmed flag: the caller gave a name but never said yes to the receptionist's read-back
+  (e.g. they corrected it more than once and the receptionist wrote down its best guess).
 - summary_bn / summary_en: one or two sentences for the receptionist.
 - translations: an object mapping each line's seq number (as a string) to a natural English translation.
 """

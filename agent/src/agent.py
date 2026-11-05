@@ -148,17 +148,15 @@ class Receptionist(Agent):
         self.last_spoke = 0.0
 
     def phone_mode(self, on: bool) -> None:
-        """While collecting the number: English speech recognition (digits come out
-        as numbers) and longer pauses; back to Bangla once it is confirmed."""
+        """While collecting the number: longer pauses, so a caller reading it out in
+        groups isn't cut off. Recognition stays bn-BD (it handles numbers spoken in
+        Bangla, English or mixed; spoken_digits() turns the words into digits)."""
         if on == self.state.collecting_phone:
             return
         self.state.collecting_phone = on
         pause = PHONE_PAUSE if on else NORMAL_PAUSE
         self.session.update_options(min_endpointing_delay=pause[0], max_endpointing_delay=pause[1])
-        stt = self.session.stt
-        if stt is not None:
-            stt.update_options(language="en-IN" if on else "bn", numerals=on)
-        logger.info("phone mode %s", "on (en-IN)" if on else "off (bn)")
+        logger.info("phone mode %s", "on" if on else "off")
 
     async def on_enter(self) -> None:
         await self.session.say(

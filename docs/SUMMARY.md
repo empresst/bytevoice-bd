@@ -4,7 +4,7 @@
 
 **Browser call** — "Talk to our Bangla caller": rate-limited token route, fresh LiveKit room per call, connecting/live/ended states, captions, clear mic/network/timeout errors.
 
-**Bangla voice agent** — LiveKit Agents in the cloud (Mumbai). Deepgram Bangla speech-to-text (English for phone numbers), Gemma 4 LLM with Groq fallback, Cartesia/Azure Bangladeshi voices with fallback. Books, reschedules and cancels real appointments; confirms name, phone (digit by digit) and the full booking first; declines medical advice; handles emergencies, off-topic questions, pranks, silence and interruptions; hands over to staff via callbacks.
+**Bangla voice agent** — LiveKit Agents in the cloud (Mumbai). Azure bn-BD speech-to-text with a Bangladeshi-name list (Deepgram fallback), Gemma 4 LLM with Groq fallback, Cartesia/Azure Bangladeshi voices with fallback. Books, reschedules and cancels real appointments; confirms name, phone (digit by digit) and the full booking first; declines medical advice; handles emergencies, off-topic questions, pranks, silence and interruptions; hands over to staff via callbacks.
 
 **Database** — Supabase Postgres (Mumbai): 14 tables, booking functions, no-double-booking constraint, Bangladeshi phone validation, full appointment history, row-level security.
 

@@ -36,6 +36,14 @@ def test_spoken_digits_double_and_triple():
     assert spoken_digits("০১৭ ট্রিপল ফাইভ") == "017555"
 
 
+def test_spoken_digits_azure_bn_bd_output():
+    # What Azure bn-BD actually returned for spoken numbers: digits and words mixed.
+    assert spoken_digits("01712345 ছয় সাত আট।") == "01712345678"
+    assert spoken_digits("জিরো ওয়ান 98765432 ওয়ান।") == "01987654321"
+    assert spoken_digits("018 ছয় 05327 আট নয়।") == "01860532789"
+    assert spoken_digits("জিরো ওয়ান সেভেন ডাবল ওয়ান টু 34567।") == "01711234567"
+
+
 def test_spoken_digits_ignores_other_words():
     assert spoken_digits("আমার নাম্বার হলো zero one") == "01"
 
