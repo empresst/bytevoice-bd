@@ -65,7 +65,8 @@ def test_say_date():
 
 
 def test_dhaka_words_replaces_whole_words_only():
-    assert dhaka_words("নমস্কার, এক গ্লাস জল আর জলখাবার, জলদি আসুন") == "আসসালামু আলাইকুম, এক গ্লাস পানি আর নাস্তা, জলদি আসুন"
+    assert dhaka_words("এক গ্লাস জল আর জলখাবার, জলদি আসুন") == "এক গ্লাস পানি আর নাস্তা, জলদি আসুন"
+    assert dhaka_words("নমস্কার") == "নমস্কার"  # mirrored to callers who greet that way, so not replaced
     assert dhaka_words("ডা. নুসরাত জাহান") == "ডাক্তার নুসরাত জাহান"
 
 

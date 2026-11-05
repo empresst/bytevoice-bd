@@ -79,7 +79,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Case | What happens | Where |
 |---|---|---|
 | Sounding Kolkata | Bangladeshi-trained voices only (Cartesia, Azure `bn-BD`); Bangla prompt with Dhaka examples and a banned-word list | Prompt + voice config |
-| Kolkata words slip through (নমস্কার, জল, স্নান, নিমন্ত্রণ, জলখাবার, আজ্ঞে) | Replaced with Dhaka words just before speech; whole words only ("জলদি" untouched) | Agent `dhaka_words` |
+| Kolkata words slip through (জল, স্নান, নিমন্ত্রণ, জলখাবার, আজ্ঞে) | Replaced with Dhaka words just before speech; whole words only ("জলদি" untouched) | Agent `dhaka_words` |
+| Caller greets with "নমস্কার" | The agent answers "নমস্কার" and says "ভালো থাকবেন" instead of "আল্লাহ হাফেজ" at the end; it never says নমস্কার on its own, and the opening greeting stays আসসালামু আলাইকুম | Prompt |
 | Caller speaks English | Understands, always answers in Bangla, including the goodbye | Prompt |
 | Second LLM goodbye in English after `end_call` | `end_call` produces no extra reply | Agent |
 | "ডা." read as "da" | Spoken as "ডাক্তার" | Agent |

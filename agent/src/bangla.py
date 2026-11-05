@@ -79,7 +79,6 @@ def say_phone(e164: str) -> str:
 # Kolkata / West Bengal words -> what a Dhaka receptionist would say.
 # Only unambiguous swaps; the prompt does the real work, this is a safety net.
 DHAKA_WORDS = {
-    "নমস্কার": "আসসালামু আলাইকুম",
     "জল": "পানি",
     "স্নান": "গোসল",
     "নিমন্ত্রণ": "দাওয়াত",
