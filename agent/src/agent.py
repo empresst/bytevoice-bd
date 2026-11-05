@@ -195,14 +195,23 @@ class Receptionist(Agent):
         if token is None or getattr(self, "_grace_for", None) is token:
             return
         self._grace_for = token
+        gen = self._grace_gen = getattr(self, "_grace_gen", 0) + 1
 
         async def after_grace() -> None:
             await asyncio.sleep(HANGUP_GRACE)
-            if self.hangup_token is token:  # the caller stayed quiet
+            if self.hangup_token is token and self._grace_gen == gen:  # quiet, and no newer timer
                 self.state.end_reason = "agent_goodbye"
                 hang_up(self.session, "agent_goodbye")
 
         fire(after_grace())
+
+    def restart_hangup_grace(self) -> None:
+        """The agent started speaking during the grace (e.g. end_call ran together with a
+        booking, and the confirmation + goodbye come after): stop the timer; it starts
+        again when the agent is back to listening."""
+        if self.hangup_token is not None:
+            self._grace_for = None
+            self._grace_gen = getattr(self, "_grace_gen", 0) + 1
 
     def cancel_hangup(self) -> None:
         """The caller spoke after the goodbye: stay on the line and carry on."""
@@ -549,6 +558,9 @@ async def entrypoint(ctx: JobContext) -> None:
     def on_agent_state(ev) -> None:
         if ev.new_state == "speaking":
             heard["agent_spoke"] = True
+            agent = session.current_agent
+            if isinstance(agent, Receptionist):
+                agent.restart_hangup_grace()
         elif ev.new_state == "listening":  # after a goodbye, or after a silent end_call
             agent = session.current_agent
             if isinstance(agent, Receptionist):
