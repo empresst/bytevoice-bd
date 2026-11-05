@@ -21,7 +21,8 @@ export function Hero() {
   const { lang } = useLang();
   const voice = useRef<VoiceState>({ level: 0, phase: "idle", speaking: false });
   const onLevel = useCallback((l: number) => { voice.current.level = l; }, []);
-  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") { voice.current.level = 0; voice.current.speaking = false; } }, []);
+  const onPhase = useCallback((p: CallPhase) => { voice.current.phase = p; if (p !== "live") { voice.current.level = 0; voice.current.speaking = false; voice.current.busy = false; } }, []);
+  const onActivity = useCallback((a: string) => { voice.current.busy = a !== ""; }, []);
   const onAgentState = useCallback((s: string) => { voice.current.speaking = s === "speaking"; }, []);
   const h = COPY.hero;
 
@@ -44,7 +45,7 @@ export function Hero() {
           </motion.p>
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }} className="mt-8 flex flex-col items-center gap-3 lg:items-start">
             <p className="text-sm text-slate-400">{t(h.try)}</p>
-            <CallWidget lang={lang} onLevel={onLevel} onPhase={onPhase} onAgentState={onAgentState} />
+            <CallWidget lang={lang} onLevel={onLevel} onPhase={onPhase} onAgentState={onAgentState} onActivity={onActivity} />
             <Link href="/portal" className="mt-1 text-sm text-slate-400 underline-offset-4 hover:text-amber-300 hover:underline">{t(h.portalCta)}</Link>
           </motion.div>
         </div>

@@ -31,6 +31,8 @@ type Props = {
   onPhase?: (phase: CallPhase) => void;
   /** LiveKit agent state: listening | thinking | speaking … */
   onAgentState?: (state: string) => void;
+  /** What the agent is doing during a tool call: "checking" | "booking" | "" (from its participant attributes). */
+  onActivity?: (activity: string) => void;
   lang?: "bn" | "en";
 };
 
@@ -120,13 +122,18 @@ export function useBanglaCall({ onPhase }: { onPhase?: (p: CallPhase) => void } 
 }
 
 /** Everything that needs the room context: audio playback, captions, voice level. */
-export function CallSurface({ onLevel, onAgentState, lang = "bn" }: Pick<Props, "onLevel" | "onAgentState" | "lang">) {
-  const { state, audioTrack } = useVoiceAssistant();
+export function CallSurface({ onLevel, onAgentState, onActivity, lang = "bn" }: Pick<Props, "onLevel" | "onAgentState" | "onActivity" | "lang">) {
+  const { state, audioTrack, agentAttributes } = useVoiceAssistant();
   const level = useTrackVolume(audioTrack, { fftSize: 256, smoothingTimeConstant: 0.2 });
   const transcriptions = useTranscriptions();
 
   useEffect(() => { onLevel?.(level); }, [level, onLevel]);
   useEffect(() => { onAgentState?.(state); }, [state, onAgentState]);
+  const activity = agentAttributes?.["bv.activity"] ?? "";
+  useEffect(() => { onActivity?.(activity); }, [activity, onActivity]);
+  // The agent bumps bv.slots after a booking, reschedule or cancel: reload the slot board now.
+  const slotChanges = agentAttributes?.["bv.slots"];
+  useEffect(() => { if (slotChanges) window.dispatchEvent(new Event("bv-slots-changed")); }, [slotChanges]);
 
   const last = transcriptions.slice(-2);
   const stateText: Record<string, { bn: string; en: string }> = {
@@ -153,7 +160,7 @@ export function CallSurface({ onLevel, onAgentState, lang = "bn" }: Pick<Props, 
   );
 }
 
-export function CallWidget({ onLevel, onPhase, onAgentState, lang = "bn" }: Props) {
+export function CallWidget({ onLevel, onPhase, onAgentState, onActivity, lang = "bn" }: Props) {
   const { room, phase, error, start, end } = useBanglaCall({ onPhase });
   const busy = phase === "connecting" || phase === "waiting";
   const t = (bn: string, en: string) => (lang === "bn" ? bn : en);
@@ -163,7 +170,7 @@ export function CallWidget({ onLevel, onPhase, onAgentState, lang = "bn" }: Prop
       <div className="flex flex-col items-center gap-3">
         {phase === "live" ? (
           <>
-            <CallSurface onLevel={onLevel} onAgentState={onAgentState} lang={lang} />
+            <CallSurface onLevel={onLevel} onAgentState={onAgentState} onActivity={onActivity} lang={lang} />
             <button onClick={end} className="rounded-full bg-rose-500 px-6 py-3 font-semibold text-white shadow-lg transition hover:bg-rose-400">
               {t("কল শেষ করুন", "End call")}
             </button>

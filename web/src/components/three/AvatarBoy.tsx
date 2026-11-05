@@ -12,7 +12,8 @@ import type { VoiceState } from "./ByteMascot";
  * The receptionist: a VRM anime character (Sakurada Fumiriya by pixiv, VRoid Hub
  * licence: free use, credit not required) wearing a headset we add in code.
  * Lips move while the agent speaks, he smiles, blinks, follows the cursor, waves
- * on load and when a call connects, and nods while listening.
+ * on load and when a call connects, nods while listening, and looks down (as if at
+ * the schedule) while the agent checks or books something.
  */
 
 const MODEL_URL = "/avatar/fumiriya.vrm";
@@ -20,6 +21,7 @@ const VOWELS = ["aa", "ih", "ou", "ee", "oh"] as const;
 
 // Resting arm pose (VRM normalised bones; 0 = T-pose).
 const REST = { upper: 1.2, lower: 0.15 };
+const LOOK_HOLD = 2.0; // seconds the "checking the schedule" look lasts at least
 // Wave: forearm raised with the palm turned to the viewer; it sways left-right
 // around the camera axis (applied on top of the pose, so the palm stays facing out).
 const FOREARM_REST = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -REST.lower));
@@ -66,7 +68,7 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
   const [vrm, setVrm] = useState<VRM | null>(null);
   const mic = useRef<THREE.MeshStandardMaterial | undefined>(undefined);
   const { camera, size } = useThree();
-  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 2.4, wasInCall: false, nod: 0, nextNod: 3 });
+  const st = useRef({ t: 0, vowel: 0, nextVowel: 0, weights: {} as Record<string, number>, blink: 0, nextBlink: 2, wave: 2.4, wasInCall: false, nod: 0, nextNod: 3, look: 0, lookHold: 0, wasBusy: false });
 
   useEffect(() => {
     const loader = new GLTFLoader();
@@ -132,20 +134,31 @@ function Boy({ voice, onReady }: { voice: React.RefObject<VoiceState>; onReady: 
     s.blink = Math.max(0, s.blink - dt * 7);
     em.setValue("blink", Math.sin(s.blink * Math.PI));
 
+    // --- looks down (as if at the schedule) while the agent checks or books something.
+    // The database step takes ~0.15 s, so hold the pose ~2 s, about as long as "জি, দেখছি".
+    const busy = !!v?.busy && inCall;
+    if (busy && !s.wasBusy) s.lookHold = LOOK_HOLD;
+    s.wasBusy = busy;
+    s.lookHold = Math.max(0, s.lookHold - dt);
+    s.look = THREE.MathUtils.lerp(s.look, busy || s.lookHold > 0 ? 1 : 0, 0.08);
+    vrm.lookAt?.applier.applyYawPitch(0, -s.look * 15); // eyes down too (this model moves eye bones)
+
     // --- head follows the cursor; small nods while listening on a call
-    if (inCall && !speaking) {
+    if (inCall && !speaking && s.look < 0.1) {
       s.nextNod -= dt;
       if (s.nextNod <= 0) { s.nod = 1; s.nextNod = 2.5 + Math.random() * 3; }
     }
     s.nod = Math.max(0, s.nod - dt * 1.6);
     const head = bone("head"), neck = bone("neck");
-    head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, pointer.x * 0.35, 0.08);
-    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, -pointer.y * 0.15 + Math.sin(s.nod * Math.PI * 2) * 0.12 + (speaking ? Math.sin(s.t * 7) * 0.025 : 0), 0.12);
+    const follow = 1 - s.look; // stop following the cursor while looking down
+    head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, pointer.x * 0.35 * follow + s.look * 0.12, 0.08);
+    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, (-pointer.y * 0.15 + Math.sin(s.nod * Math.PI * 2) * 0.12) * follow - s.look * 0.38 + (speaking ? Math.sin(s.t * 7) * 0.025 : 0), 0.12);
     head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, inCall && !speaking ? 0.06 : Math.sin(s.t * 0.7) * 0.02, 0.05);
-    neck.rotation.y = THREE.MathUtils.lerp(neck.rotation.y, pointer.x * 0.12, 0.06);
+    neck.rotation.y = THREE.MathUtils.lerp(neck.rotation.y, pointer.x * 0.12 * follow, 0.06);
+    neck.rotation.x = THREE.MathUtils.lerp(neck.rotation.x, -s.look * 0.14, 0.08); // negative = down on this rig
 
     // --- breathing
-    bone("chest").rotation.x = Math.sin(s.t * 1.8) * 0.015;
+    bone("chest").rotation.x = Math.sin(s.t * 1.8) * 0.015 - s.look * 0.05; // leans in slightly
     bone("spine").rotation.z = Math.sin(s.t * 0.9) * 0.012;
 
     // --- arms: wave on load and when a call connects; small gestures while talking

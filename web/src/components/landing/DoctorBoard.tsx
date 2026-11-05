@@ -114,9 +114,14 @@ export function DoctorBoard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     const id = setInterval(load, 30_000);
-    const onEnded = () => setTimeout(load, 4000); // after the agent has saved the booking
+    const onEnded = () => setTimeout(load, 2000); // in case a change landed as the call closed
     window.addEventListener("bv-call-ended", onEnded);
-    return () => { clearInterval(id); window.removeEventListener("bv-call-ended", onEnded); };
+    window.addEventListener("bv-slots-changed", load); // the agent just booked, moved or cancelled
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("bv-call-ended", onEnded);
+      window.removeEventListener("bv-slots-changed", load);
+    };
   }, [load]);
 
   const doctor = useMemo(() => data?.doctors.find((d) => d.id === docId) ?? data?.doctors[0], [data, docId]);

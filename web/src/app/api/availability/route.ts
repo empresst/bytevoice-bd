@@ -60,5 +60,7 @@ export async function GET() {
     })),
     slots: slots.map((s) => ({ doctor_id: s.doctor_id, starts_at: (s.starts_at as Date).toISOString(), booked: s.booked })),
   };
-  return NextResponse.json(body, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=20" } });
+  // Not cached: a slot booked on a call must show as taken on the next load (the board
+  // reloads when the agent signals a booking). One small query per load.
+  return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
 }

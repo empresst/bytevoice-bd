@@ -28,6 +28,7 @@ from livekit.agents import (
     RunContext,
     cli,
     function_tool,
+    get_job_context,
 )
 from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import silero
@@ -61,6 +62,10 @@ PARTS_OF_DAY = {"morning": (0, 12), "noon": (12, 15), "afternoon": (15, 18), "ev
 BN_TO_ASCII = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 # (min, max) seconds of silence before the caller's turn counts as finished.
 NORMAL_PAUSE = (0.8, 3.0)
+# What the website shows while a tool runs (avatar looks down), and the tools that change free slots.
+TOOL_ACTIVITY = {"check_availability": "checking", "find_appointments": "checking",
+                 "book_appointment": "booking", "reschedule_appointment": "booking", "cancel_appointment": "booking"}
+SLOT_CHANGING_TOOLS = {"book_appointment", "reschedule_appointment", "cancel_appointment"}
 # Recognition watchdog: speech this long with no transcript this long after it ends = a stall.
 MIN_STALL_SPEECH = 1.0
 STALL_WAIT = 2.5
@@ -152,6 +157,7 @@ class Receptionist(Agent):
         self.state = state
         self.doctor_ids = doctor_ids
         self.last_spoke = 0.0
+        self.slot_changes = 0
 
     def phone_mode(self, on: bool) -> None:
         """While collecting the number: longer pauses, so a caller reading it out in
@@ -194,6 +200,9 @@ class Receptionist(Agent):
     async def _run(self, name: str, args: dict, coro) -> dict:
         """Run a tool, log it to tool_invocations, never raise into the LLM."""
         t0 = time.perf_counter()
+        activity = TOOL_ACTIVITY.get(name)
+        if activity:
+            fire(self._signal({"bv.activity": activity}))
         try:
             result = await asyncio.wait_for(coro, timeout=8)
             ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
@@ -204,7 +213,22 @@ class Receptionist(Agent):
             _ = e
         ms = int((time.perf_counter() - t0) * 1000)
         fire(db.log_tool(self.state.call_id, name, args, result, ok, ms))
+        done = {"bv.activity": ""} if activity else {}
+        if ok and name in SLOT_CHANGING_TOOLS:
+            self.slot_changes += 1
+            done["bv.slots"] = str(self.slot_changes)  # the website's slot board reloads on change
+        if done:
+            fire(self._signal(done))
         return result
+
+    async def _signal(self, attrs: dict[str, str]) -> None:
+        """Tell the website what the agent is doing (participant attributes: the
+        avatar looks down while checking/booking; the slot board reloads after a
+        booking change). A few bytes over the call's existing connection."""
+        try:
+            await get_job_context().room.local_participant.set_attributes(attrs)
+        except Exception:
+            logger.debug("could not set participant attributes %s", attrs, exc_info=True)
 
     # ------------------------------------------------------------------ tools
 
@@ -378,9 +402,9 @@ class Receptionist(Agent):
         context: RunContext,
         appointment_id: str,
         phone: str,
-        reason: str | None = None,
+        reason: Annotated[str | None, Field(description="Only if the caller already said why. Never ask for a reason.")] = None,
     ) -> dict:
-        """Cancel an appointment. Confirm with the caller first."""
+        """Cancel an appointment as soon as the caller confirms which one. Do not ask why."""
         self._ack("book")
         async def go() -> dict:
             r = await db.cancel(appointment_id, phone, self.state.call_id, reason)

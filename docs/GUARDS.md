@@ -25,6 +25,7 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Agent claims "বুক হয়ে গেছে" before booking | Forbidden until the booking tool succeeds | Prompt |
 | No name given | `name_required`; the prompt requires asking and confirming the full name | DB + Prompt |
 | Reschedule / cancel someone else's appointment | Functions require the phone the appointment was booked with → `appointment_not_found` | DB |
+| Cancelling | Cancels as soon as the caller confirms which appointment; never asks why (a test showed the model asking twice) | Tool description |
 | Caller doesn't remember which number they booked with | Asks once for another number, then records a staff callback to match it up | Prompt |
 | Cancel/reschedule when no appointment exists | `find_appointments` returns an empty list; the agent says so | DB + Agent |
 | Reschedule keeps the same service length and doctor; the old slot is freed | `reschedule_appointment` + exclusion constraint ignoring itself | DB |
@@ -149,7 +150,9 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Slow 3D load / no WebGL | Soft glow placeholder; the page works without the 3D | Web |
 | Two 3D scenes at once | Byte only renders while its section is on screen | Web `LazyByte` |
 | Phones | Mobile framing (head and shoulders), no horizontal overflow | Web |
-| Slot board edge cases | Friday "বন্ধ", "এই দিনে চেম্বার নেই", "কোনো স্লট পাওয়া যাচ্ছে না"; booked slots disabled; refreshes after each call and every 30 s | Web `DoctorBoard` |
+| Slot board edge cases | Friday "বন্ধ", "এই দিনে চেম্বার নেই", "কোনো স্লট পাওয়া যাচ্ছে না"; booked slots disabled; every 30 s | Web `DoctorBoard` |
+| A slot booked on a call still looks free | The agent signals each booking, reschedule or cancel (participant attribute `bv.slots`); the board reloads within ~0.2 s, mid-call. The slot API is not cached (`no-store`), so the reload sees the change | Agent `_run` + Web `CallWidget`, `DoctorBoard`, `/api/availability` |
+| Receptionist frozen while the system works | While checking or booking (`bv.activity`), the avatar looks down as if at the schedule, held ~2 s (the database step itself takes ~0.15 s) | Agent `_run` + Web `AvatarBoy` |
 
 ## 10. How these were checked
 
