@@ -6,8 +6,17 @@ A working demo of StrategyByte's ByteVoice for Bangladesh: a landing page with a
 |---|---|
 | Landing page + Bangla caller | https://bytevoice-bd.vercel.app |
 | Clinic portal | https://bytevoice-bd.vercel.app/portal (reviewer login is in the submission email) |
-| Video overview (3 min) | _in the submission email_ |
+| Video overview (3 min) | https://www.loom.com/share/2bdaedee5a1a4a7f93fb1a71fec8659d |
 | Decisions and testing | [docs/DECISIONS.md](docs/DECISIONS.md) · every guard: [docs/GUARDS.md](docs/GUARDS.md) |
+
+## Engineering highlights
+
+- **Speech recognition chosen by measurement, not reputation.** On 50 Bangladeshi-name clips, Azure `bn-BD` with a common-name phrase list got 48 right vs Deepgram's 38; Deepgram tended to split names into ordinary words ("ফেরদৌস" → "ফের দোষ"). Deepgram stays as the automatic fallback.
+- **Correctness lives in the database, not the prompt.** A Postgres exclusion constraint makes double-booking impossible even under concurrent calls; each treatment blocks the doctor for its real length (a 60-min root canal at 12:00 also closes 12:30); doctors' chamber days come from the schedule table.
+- **The model is never trusted with facts it can get wrong.** Times, dates and phone read-backs are generated in code; the agent confirms the name and the number and reads back the full booking before calling the booking function; outcomes in the portal come from what the database actually did, not from what the model claimed.
+- **Every provider has a free fallback, and silent failures are detected.** Speech recognition, LLM and voice each fall back automatically; a watchdog notices when recognition goes quiet (no error, so no automatic fallback) and replaces the session in ~0.1 s.
+- **Tested like a phone system.** Scripted live-audio callers ran every flow (booking, cancel, reschedule, names, numbers, off-topic, goodbyes, recognition stalls) against the local *and* the deployed agent, and the cloud logs were checked after each deploy; three bugs were found that way and fixed (see [DECISIONS.md](docs/DECISIONS.md)).
+- **Measured, not guessed:** median reply ~2.7 s on the deployed agent (12 calls, 103 replies); free-tier budgets worked out for a ~25-call review.
 
 The demo clinic is **রাকিব ডেন্টাল কেয়ার (Rakib Dental Care), Dhanmondi**: three doctors, eight services, Saturday–Thursday chambers, closed on Friday. All clinic, doctor and patient data is fictional.
 
@@ -96,10 +105,10 @@ Everything runs on free tiers. Each choice was tested, not assumed:
 
 Every reply's timing comes from LiveKit's per-turn metrics and is stored on the call; the portal shows a **Call quality** box per call and "replied in 1.4s" on each agent line.
 
-| Measured (local dev agent, Azure voice) | |
+| Measured on the deployed agent, 5 Nov 2026 (12 calls, 103 replies; Cartesia and Azure voices) | median |
 |---|---|
-| Caller stops → agent starts speaking (average) | ~2.2–2.5 s |
-| Breakdown | end-of-speech wait ~0.9 s · first LLM token ~0.9 s · first audio ~0.4 s |
+| Caller stops → agent starts speaking | **2.7 s** (plain replies ~2.3 s; replies that check the database ~4 s, with an instant "জি, দেখছি…" first) |
+| Breakdown | end-of-speech wait 1.0 s · first LLM token 0.9 s · first audio 0.1 s |
 | Interruptions | handled (stops and listens) |
 
 The wait for the end of speech is deliberately 0.8 s (2 s while a phone number is being read) because Bangla speakers pause mid-sentence and shorter values cut callers off in testing. To make waits feel shorter, the agent starts drafting while the caller finishes, and says "জি, একটু দেখছি…" immediately when it checks the database. For context, the BanglaTalk research assistant reports 4.9 s end-to-end.
