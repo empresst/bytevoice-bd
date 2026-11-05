@@ -20,6 +20,11 @@ MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "�
           "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"]
 
 
+def pg_weekday(dow: int) -> str:
+    """Postgres weekday (0 = Sunday) -> Bangla name."""
+    return WEEKDAYS[(dow - 1) % 7]
+
+
 def part_of_day(hour: int) -> str:
     if hour < 12:
         return "সকাল"

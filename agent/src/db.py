@@ -63,6 +63,10 @@ async def clinic_profile() -> dict[str, Any]:
            group by d.id order by d.full_name_en""",
         CLINIC_ID,
     )
+    schedules = await p.fetch(
+        "select doctor_id, weekday, start_time, end_time from doctor_schedules where doctor_id = any($1::uuid[]) order by weekday",
+        [d["id"] for d in doctors],
+    )
     services = await p.fetch(
         "select code, name_bn, name_en, duration_min, fee_bdt, prep_notes_bn from services where clinic_id = $1 and active order by fee_bdt",
         CLINIC_ID,
@@ -70,7 +74,9 @@ async def clinic_profile() -> dict[str, Any]:
     return {
         "clinic": dict(clinic) | {"info": _json(clinic["info"])},
         # short code (first name) instead of a UUID: fewer tokens, and the model can't garble it
-        "doctors": [dict(d) | {"code": d["full_name_en"].split()[1].lower(), "services": [c for c in d["services"] if c]} for d in doctors],
+        "doctors": [dict(d) | {"code": d["full_name_en"].split()[1].lower(), "services": [c for c in d["services"] if c],
+                               # chamber days, Postgres numbering (0 = Sunday)
+                               "schedule": [dict(s) for s in schedules if s["doctor_id"] == d["id"]]} for d in doctors],
         "services": [dict(s) for s in services],
     }
 

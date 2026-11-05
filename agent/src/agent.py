@@ -36,7 +36,14 @@ from pydantic import Field
 load_dotenv(".env.local")
 
 import db  # noqa: E402  (needs env loaded first)
-from bangla import DIGIT_WORDS, dhaka_words, say_datetime, say_phone, spoken_digits  # noqa: E402
+from bangla import (  # noqa: E402
+    DIGIT_WORDS,
+    dhaka_words,
+    pg_weekday,
+    say_datetime,
+    say_phone,
+    spoken_digits,
+)
 from extraction import extract_and_store  # noqa: E402
 from prompt import build_prompt  # noqa: E402
 from voice import build_llm, build_stt, build_tts, dither_silence, restart_stalled_azure  # noqa: E402
@@ -160,10 +167,12 @@ class CallState:
 
 
 class Receptionist(Agent):
-    def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str]) -> None:
+    def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str],
+                 doctor_days: dict[str, list[int]]) -> None:
         super().__init__(instructions=instructions)
         self.state = state
         self.doctor_ids = doctor_ids
+        self.doctor_days = doctor_days  # code -> chamber weekdays (Postgres: 0 = Sunday)
         self.last_spoke = 0.0
         self.slot_changes = 0
         self.hangup_token: object | None = None  # set while a hang-up is pending after the goodbye
@@ -302,6 +311,12 @@ class Receptionist(Agent):
                 return {"ok": False, "error": "date_in_past"}
             if day.weekday() == 4:
                 return {"ok": False, "error": "closed_friday", "say": "শুক্রবার ক্লিনিক বন্ধ থাকে।"}
+            days = self.doctor_days.get(doctor or "", [])
+            if doctor and days and (day.weekday() + 1) % 7 not in days:  # Python Mon=0 -> Postgres Sun=0
+                return {"ok": False, "error": "doctor_not_in_that_day",
+                        "doctor_days": [pg_weekday(d) for d in days],
+                        "note": "Say this doctor doesn't sit that day, name the days they do, and offer one of "
+                                "those days or another doctor who does this service on the asked day."}
             rows = await db.available_slots(day, service_code, None)
             code_of = {v: k for k, v in self.doctor_ids.items()}
             lo, hi = PARTS_OF_DAY.get(part_of_day, (0, 24))
@@ -628,7 +643,8 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(finish)
 
     doctor_ids = {d["code"]: str(d["id"]) for d in profile["doctors"]}
-    await session.start(agent=Receptionist(build_prompt(profile, now), state, doctor_ids), room=ctx.room)
+    doctor_days = {d["code"]: sorted({s["weekday"] for s in d["schedule"]}) for d in profile["doctors"]}
+    await session.start(agent=Receptionist(build_prompt(profile, now), state, doctor_ids, doctor_days), room=ctx.room)
 
 
 if __name__ == "__main__":

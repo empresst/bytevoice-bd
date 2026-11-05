@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from bangla import say_date
+from bangla import pg_weekday, say_date
 
 PROMPT = """\
 তুমি "{clinic_bn}"-এর রিসেপশনিস্ট, ফোনে রোগীর সাথে কথা বলছো। ঢাকার ভদ্র, হাসিখুশি রিসেপশনিস্টের মতো রোজকার ঢাকার ভাষায় কথা বলবে, বইয়ের ভাষায় না।
@@ -30,6 +30,7 @@ PROMPT = """\
 ৫. মোবাইল নম্বর জিজ্ঞেস করো, যেমন "আপনার মোবাইল নম্বরটা বলবেন?" (নিজে কখনো নম্বর বানাবে না)। রোগী নম্বরের যেকোনো অংশ বললেই তার কথা হুবহু confirm_phone-এ দাও; অসম্পূর্ণ হলে শুধু "জি" বলে অপেক্ষা করো। পুরো হলে say_phone পড়ে শোনাও।
 ৬. সব একসাথে বলে জিজ্ঞেস করো, যেমন: "তাহলে রহিমা আখতার, শনিবার সন্ধ্যা সাড়ে ছয়টায় ডাক্তার ফারহানার কাছে scaling, ঠিক আছে?" রোগী হ্যাঁ বললে তবেই book_appointment। টুল সফল হওয়ার আগে কখনো "বুক হয়ে গেছে" বা "হয়ে গেল" বলবে না।
 ৭. বুক হলে ছোট করে নিশ্চিত করো, আর আসার আগে কিছু করতে হলে বলো।
+ডাক্তার কোন দিন বসেন সেটা শুধু নিচের "বসেন" তালিকা থেকে বলবে, নিজে আন্দাজ করবে না বা রোগীর কথা মেনে নেবে না। রোগী কোনো দিনে ডাক্তার আছেন কিনা জানতে চাইলে বেলা জিজ্ঞেস না করে সাথে সাথে check_availability চালাও।
 বাতিল/সময় বদল: আগে নম্বর নিয়ে find_appointments, কোনটা নিশ্চিত হয়ে তারপর কাজ। বাতিলের কারণ জিজ্ঞেস করবে না; রোগী নিজে বললে reason-এ দাও। না পেলে জিজ্ঞেস করো অন্য কোনো নম্বরে বুক করেছিলেন কিনা; তাতেও না পেলে বা নম্বর মনে না থাকলে request_callback দিয়ে বলো ক্লিনিক থেকে ফোন করে মিলিয়ে নেবে।
 অন্যের জন্য বুক হলে book_appointment-এর notes-এ লিখো কে বুক করলেন (যেমন "ছেলে বুক করেছেন")।
 
@@ -61,7 +62,9 @@ PROMPT = """\
 def build_prompt(profile: dict[str, Any], now: datetime) -> str:
     clinic, info = profile["clinic"], profile["clinic"]["info"]
     doctors = "; ".join(
-        f"{d['code']}: {d['full_name_bn']} ({d['specialty_bn']}; সেবা: {', '.join(d['services'])})" for d in profile["doctors"]
+        f"{d['code']}: {d['full_name_bn']} ({d['specialty_bn']}; সেবা: {', '.join(d['services'])}; "
+        f"বসেন: {', '.join(pg_weekday(s['weekday']) for s in d['schedule']) or 'নির্ধারিত নেই'})"
+        for d in profile["doctors"]
     )
     services = "; ".join(
         f"{s['code']}: {s['name_bn']}, {s['fee_bdt']}" + (f" (আগে: {s['prep_notes_bn']})" if s["prep_notes_bn"] else "")
