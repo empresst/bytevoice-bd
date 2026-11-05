@@ -30,7 +30,6 @@ from livekit.agents import (
     function_tool,
     get_job_context,
 )
-from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import silero
 from pydantic import Field
 
@@ -66,6 +65,9 @@ NORMAL_PAUSE = (0.8, 3.0)
 TOOL_ACTIVITY = {"check_availability": "checking", "find_appointments": "checking",
                  "book_appointment": "booking", "reschedule_appointment": "booking", "cancel_appointment": "booking"}
 SLOT_CHANGING_TOOLS = {"book_appointment", "reschedule_appointment", "cancel_appointment"}
+# After the goodbye the line stays open this long; if the caller says anything, the
+# hang-up is cancelled. Silence -> the agent hangs up (and closes the room).
+HANGUP_GRACE = 4.0
 # Recognition watchdog: speech this long with no transcript this long after it ends = a stall.
 MIN_STALL_SPEECH = 1.0
 STALL_WAIT = 2.5
@@ -75,6 +77,16 @@ ServiceCode = Literal["checkup", "scaling", "filling", "root_canal", "extraction
                       "braces_consult", "whitening", "child_checkup"]
 DoctorCode = Literal["tanvir", "farhana", "nusrat"]
 
+
+
+def hang_up(session: AgentSession, reason: str) -> None:
+    """End the call for everyone: close the room now (the caller's browser shows
+    "call ended" straight away instead of sitting in an empty room), then stop the
+    agent. Saving and summarising the call runs afterwards in the shutdown callback."""
+    job = get_job_context()
+    fire(job.delete_room())
+    session.once("close", lambda _ev: job.shutdown(reason=reason))
+    session.shutdown()
 
 class CallQuality:
     """Turn-by-turn timings from LiveKit's per-message metrics, summarised per call."""
@@ -149,15 +161,12 @@ class CallState:
 
 class Receptionist(Agent):
     def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str]) -> None:
-        super().__init__(
-            instructions=instructions,
-            tools=[EndCallTool(end_instructions=None, ignore_on_enter=True,
-                               extra_description="Say your Bangla goodbye BEFORE calling this; nothing is spoken after it.")],
-        )
+        super().__init__(instructions=instructions)
         self.state = state
         self.doctor_ids = doctor_ids
         self.last_spoke = 0.0
         self.slot_changes = 0
+        self.hangup_token: object | None = None  # set while a hang-up is pending after the goodbye
 
     def phone_mode(self, on: bool) -> None:
         """While collecting the number: longer pauses, so a caller reading it out in
@@ -169,6 +178,28 @@ class Receptionist(Agent):
         pause = PHONE_PAUSE if on else NORMAL_PAUSE
         self.session.update_options(min_endpointing_delay=pause[0], max_endpointing_delay=pause[1])
         logger.info("phone mode %s", "on" if on else "off")
+
+    @function_tool()
+    async def end_call(self, context: RunContext) -> None:
+        """End the call. Say your Bangla goodbye BEFORE calling this; nothing is spoken after it.
+        The line stays open a few seconds in case the caller still says something."""
+        token = self.hangup_token = object()
+
+        async def after_grace() -> None:
+            await asyncio.sleep(HANGUP_GRACE)
+            if self.hangup_token is token:  # the caller stayed quiet
+                self.state.end_reason = "agent_goodbye"
+                hang_up(self.session, "agent_goodbye")
+
+        # Start the grace period once the goodbye has finished playing.
+        context.speech_handle.add_done_callback(lambda _: fire(after_grace()))
+        return None  # no reply: the goodbye was already said
+
+    def cancel_hangup(self) -> None:
+        """The caller spoke after the goodbye: stay on the line and carry on."""
+        if self.hangup_token is not None:
+            self.hangup_token = None
+            logger.info("caller spoke after the goodbye; staying on the line")
 
     async def stt_node(self, audio, model_settings):
         """Caller audio -> speech recognition, with exact-silence frames dithered (see dither_silence)."""
@@ -528,6 +559,9 @@ async def entrypoint(ctx: JobContext) -> None:
         now_t = time.monotonic()
         if ev.new_state == "speaking":
             heard["speech_start"], heard["agent_spoke"] = now_t, False
+            agent = session.current_agent
+            if isinstance(agent, Receptionist):
+                agent.cancel_hangup()
         # Skip short sounds (cough, "হুঁ") and anything said over the agent (echo, backchannel).
         elif (ev.old_state == "speaking" and ev.new_state == "listening"
               and now_t - heard["speech_start"] >= MIN_STALL_SPEECH and not heard["agent_spoke"]):
@@ -545,13 +579,13 @@ async def entrypoint(ctx: JobContext) -> None:
         else:
             state.end_reason = "silence"
             await session.say("মনে হচ্ছে লাইনে সমস্যা হচ্ছে। পরে আবার ফোন করবেন। আল্লাহ হাফেজ।")
-            session.shutdown()
+            hang_up(session, "silence")
 
     async def call_cap() -> None:
         await asyncio.sleep(MAX_CALL_SECONDS)
         state.end_reason = "time_limit"
         await session.say("দুঃখিত, এই ডেমো কলের সময় শেষ হয়ে গেছে। ধন্যবাদ, আল্লাহ হাফেজ।")
-        session.shutdown()
+        hang_up(session, "time_limit")
 
     cap = asyncio.create_task(call_cap())
 

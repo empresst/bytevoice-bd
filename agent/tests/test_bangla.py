@@ -71,3 +71,4 @@ def test_dhaka_words_replaces_whole_words_only():
 
 def test_azure_pronunciation_rewrites_sare():
     assert azure_pronunciation("বিকাল সাড়ে পাঁচটা") == "বিকাল পাঁচটা তিরিশে"
+

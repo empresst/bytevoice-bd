@@ -70,6 +70,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Pranks or abuse | One polite warning, then goodbye and `end_call` | Prompt |
 | Invented clinic information | Only facts in the prompt (from the DB) or from tools may be used | Prompt |
 | Long calls | Hard limit of 5 minutes, then a polite goodbye | Agent `MAX_CALL_DURATION_SECONDS` |
+| Hanging up the instant it says "আল্লাহ হাফেজ" | After the goodbye the line stays open 4 s: if the caller says anything the hang-up is cancelled and the agent answers; a plain "আল্লাহ হাফেজ"/"ধন্যবাদ" back ends it without another goodbye. Tested all three | Agent `end_call` + prompt |
+| Browser left in an empty room after the agent hangs up | Every agent hang-up (goodbye, silence, time limit) closes the room straight away, so the page shows "call ended"; saving the summary runs afterwards | Agent `hang_up` |
 
 ## 4. Language and voice
 
