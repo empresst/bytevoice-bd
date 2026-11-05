@@ -20,6 +20,16 @@ MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "�
           "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"]
 
 
+# Azure turns "বার" (weekday) into the number 12: "নয় তারিখ কি বার?" arrives as
+# "নয় তারিখ কি 12"। After "… তারিখ কি", it is always the weekday question.
+_WEEKDAY_Q_RE = re.compile(r"(তারিখ(?:টা|ে)?\s*(?:কি|কী)\s*)(?:12|১২|বারো|বারে)(?![0-9০-৯ঀ-৿])")
+
+
+def fix_weekday_question(text: str) -> str:
+    """'নয় তারিখ কি 12' -> 'নয় তারিখ কি বার'."""
+    return _WEEKDAY_Q_RE.sub(r"\1বার", text)
+
+
 def pg_weekday(dow: int) -> str:
     """Postgres weekday (0 = Sunday) -> Bangla name."""
     return WEEKDAYS[(dow - 1) % 7]

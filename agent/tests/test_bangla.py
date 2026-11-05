@@ -79,3 +79,11 @@ def test_cartesia_gets_appointment_in_bangla_script():
     from bangla import cartesia_pronunciation
     assert cartesia_pronunciation("আপনার appointment-টা বুক হয়ে গেছে") == "আপনার অ্যাপয়েন্টমেন্টটা বুক হয়ে গেছে"
     assert cartesia_pronunciation("কোনো Appointment লাগবে? slot-টা খালি") == "কোনো অ্যাপয়েন্টমেন্ট লাগবে? slot টা খালি"
+
+
+def test_weekday_question_not_read_as_twelve():
+    from bangla import fix_weekday_question
+    assert fix_weekday_question("নয় তারিখ কি 12।") == "নয় তারিখ কি বার।"
+    assert fix_weekday_question("৯ তারিখ কী বারো?") == "৯ তারিখ কী বার?"
+    assert fix_weekday_question("১২ তারিখে আসবো") == "১২ তারিখে আসবো"  # a real 12th stays
+    assert fix_weekday_question("তারিখ কি 12টায়") == "তারিখ কি 12টায়"  # "12টায়" is a time, untouched

@@ -17,6 +17,8 @@ Legend: **DB** = Postgres (`supabase/migrations`), **Agent** = `agent/src/*.py`,
 | Agent says "দেখছি" and then stops | Prompt requires the check in the same reply (fixed after a test showed silence) | Prompt |
 | Caller names a doctor who doesn't do that service (root canal with Dr. Tanvir) | Each doctor's services are in the prompt; the agent says who does it ("রুট ক্যানেল ডা. নুসরাত জাহান করেন") | Prompt + DB `doctor_services` |
 | "Is Dr. X in on Wednesday?" (a day they don't sit) | Each doctor's chamber days are in the prompt from `doctor_schedules`; the agent answers from that list, never by agreeing with the caller, and the slot check returns `doctor_not_in_that_day` with the days they do sit. Before the fix it said "থাকবেন" and later "no slots" (a real test call) | DB + Prompt + Agent `check_availability` |
+| Service nobody offers on that day (root canal on a Monday: only Dr. Nusrat does it) | The slot check returns `no_doctor_for_service_that_day` with who does it and their days, so the agent says that instead of "no slots" | Agent `check_availability` |
+| "৯ তারিখ কি বার?" heard as "৯ তারিখ কি 12" | Azure turns "বার" (weekday) into 12; after "… তারিখ কি" it is rewritten back to "বার" before the agent reads it, and the agent answers the weekday from its calendar | Agent `fix_weekday_question` + Prompt |
 | Caller didn't name a doctor | Availability searches **all** doctors; a named doctor's slots are listed first | Agent `check_availability` |
 | Friday | Clinic closed: the tool returns `closed_friday`, the prompt calendar marks it, the slot board shows "বন্ধ" | Agent + Prompt + Web |
 | Past date ("গতকাল") | `date_in_past` → asks for another day | Agent |

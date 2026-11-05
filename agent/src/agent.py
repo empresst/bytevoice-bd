@@ -39,6 +39,7 @@ import db  # noqa: E402  (needs env loaded first)
 from bangla import (  # noqa: E402
     DIGIT_WORDS,
     dhaka_words,
+    fix_weekday_question,
     pg_weekday,
     say_datetime,
     say_phone,
@@ -168,11 +169,12 @@ class CallState:
 
 class Receptionist(Agent):
     def __init__(self, instructions: str, state: CallState, doctor_ids: dict[str, str],
-                 doctor_days: dict[str, list[int]]) -> None:
+                 doctor_days: dict[str, list[int]], doctors: list[dict]) -> None:
         super().__init__(instructions=instructions)
         self.state = state
         self.doctor_ids = doctor_ids
         self.doctor_days = doctor_days  # code -> chamber weekdays (Postgres: 0 = Sunday)
+        self.doctors = doctors  # name, services and days, to explain "no doctor that day"
         self.last_spoke = 0.0
         self.slot_changes = 0
         self.activity_count = 0
@@ -236,6 +238,8 @@ class Receptionist(Agent):
                 yield dither_silence(frame)
 
         async for ev in Agent.default.stt_node(self, dithered(), model_settings):
+            for alt in getattr(ev, "alternatives", None) or []:
+                alt.text = fix_weekday_question(alt.text)  # "তারিখ কি 12" -> "তারিখ কি বার"
             yield ev
 
     async def on_enter(self) -> None:
@@ -322,6 +326,13 @@ class Receptionist(Agent):
                         "note": "Say this doctor doesn't sit that day, name the days they do, and offer one of "
                                 "those days or another doctor who does this service on the asked day."}
             rows = await db.available_slots(day, service_code, None)
+            dow = (day.weekday() + 1) % 7  # Python Mon=0 -> Postgres Sun=0
+            doers = [d for d in self.doctors if service_code in d["services"]]
+            if not rows and not doctor and doers and not any(dow in self.doctor_days.get(d["code"], []) for d in doers):
+                # e.g. root canal on a Monday: only Dr. Nusrat does it, and she doesn't sit then
+                return {"ok": False, "error": "no_doctor_for_service_that_day",
+                        "doctors": [{"name": d["full_name_bn"], "days": [pg_weekday(x) for x in self.doctor_days.get(d["code"], [])]} for d in doers],
+                        "note": "Say who does this service and that they don't sit on that day; name their days and offer one."}
             code_of = {v: k for k, v in self.doctor_ids.items()}
             lo, hi = PARTS_OF_DAY.get(part_of_day, (0, 24))
             local = [(r, r["starts_at"].astimezone(DHAKA)) for r in rows]
@@ -648,7 +659,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     doctor_ids = {d["code"]: str(d["id"]) for d in profile["doctors"]}
     doctor_days = {d["code"]: sorted({s["weekday"] for s in d["schedule"]}) for d in profile["doctors"]}
-    await session.start(agent=Receptionist(build_prompt(profile, now), state, doctor_ids, doctor_days), room=ctx.room)
+    await session.start(agent=Receptionist(build_prompt(profile, now), state, doctor_ids, doctor_days, profile["doctors"]), room=ctx.room)
 
 
 if __name__ == "__main__":
