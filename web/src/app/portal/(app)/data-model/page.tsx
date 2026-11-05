@@ -10,7 +10,7 @@ const TABLES: Table[] = [
   { name: "services", group: "Clinic", purpose: "What can be booked, how long it takes and the fee in taka.", cols: ["code (unique per clinic)", "name_bn / _en", "duration_min", "fee_bdt", "prep_notes_bn"], fks: ["clinics"] },
   { name: "doctor_services", group: "Clinic", purpose: "Which doctor offers which service.", cols: ["doctor_id", "service_id"], fks: ["doctors", "services"] },
   { name: "doctor_schedules", group: "Clinic", purpose: "Weekly chamber hours. Friday has none: the clinic is closed.", cols: ["weekday 0-6", "start_time", "end_time", "slot_minutes"], fks: ["doctors"] },
-  { name: "calls", group: "Calls", purpose: "One row per call, created the moment the agent joins.", cols: ["id", "started_at / ended_at", "duration_s (generated)", "status: live | ended | failed", "outcome", "flags[]", "summary_bn / _en", "avg_latency_ms"], fks: ["clinics", "patients"] },
+  { name: "calls", group: "Calls", purpose: "One row per call, created the moment the agent joins.", cols: ["id", "started_at / ended_at", "duration_s (generated)", "status: live | ended | failed", "outcome", "flags[]", "end_reason", "summary_bn / _en", "avg_latency_ms", "quality (reply times, voice, LLM, recognition restarts)", "livekit_room"], fks: ["clinics", "patients"] },
   { name: "transcript_turns", group: "Calls", purpose: "Every line spoken, saved live during the call; English added after.", cols: ["call_id + seq (unique)", "speaker: agent | caller", "text_bn", "text_en", "offset_ms", "interrupted"], fks: ["calls"] },
   { name: "call_extractions", group: "Calls", purpose: "Structured fields pulled from the transcript after the call, validated first.", cols: ["call_id (PK)", "intent", "patient_name_bn / _en", "phone_e164 (checked)", "reason_for_visit", "preferred_date_text + _datetime", "outcome", "confidence", "validation_errors[]", "raw (jsonb)"], fks: ["calls"] },
   { name: "tool_invocations", group: "Calls", purpose: "Audit log of every action the AI took mid-call: input, output, success, timing.", cols: ["call_id", "tool_name", "args (jsonb)", "result (jsonb)", "ok", "duration_ms"], fks: ["calls"] },
@@ -58,6 +58,13 @@ export default async function DataModelPage() {
         <p className="max-w-3xl text-sm text-slate-500">
           How every call is organised, structured and stored. Postgres 17 on Supabase, region <b>ap-south-1 (Mumbai)</b>, the closest available region to Bangladesh.
           Times are stored in UTC and shown in Asia/Dhaka. Live row counts are for this clinic.
+        </p>
+        <p className="mt-1 max-w-3xl text-xs text-slate-500">
+          Key columns shown. Full schema (every column, type, constraint, index and security policy):{" "}
+          <a href="https://github.com/empresst/bytevoice-bd/tree/main/supabase/migrations" target="_blank" rel="noopener noreferrer" className="font-medium text-sky-700 underline">
+            supabase/migrations on GitHub
+          </a>
+          .
         </p>
       </header>
 
