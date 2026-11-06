@@ -178,6 +178,8 @@ class Receptionist(Agent):
         self.last_spoke = 0.0
         self.slot_changes = 0
         self.activity_count = 0
+        self.found: dict[str, dict] = {}  # appointments from find_appointments, by id
+        self.failed_moves = 0
         self.hangup_token: object | None = None  # set while a hang-up is pending after the goodbye
 
     def phone_mode(self, on: bool) -> None:
@@ -319,13 +321,22 @@ class Receptionist(Agent):
                 return {"ok": False, "error": "date_in_past"}
             if day.weekday() == 4:
                 return {"ok": False, "error": "closed_friday", "say": "শুক্রবার ক্লিনিক বন্ধ থাকে।"}
+            nonlocal doctor
+            only_doctor = None
+            if not doctor and len(self.found) == 1:  # moving the caller's appointment: same doctor by default
+                only_doctor = doctor = next(iter(self.found.values()))["doctor"]
             days = self.doctor_days.get(doctor or "", [])
             if doctor and days and (day.weekday() + 1) % 7 not in days:  # Python Mon=0 -> Postgres Sun=0
+                others = [d["code"] for d in self.doctors
+                          if service_code in d["services"] and (day.weekday() + 1) % 7 in self.doctor_days.get(d["code"], [])]
                 return {"ok": False, "error": "doctor_not_in_that_day",
                         "doctor_days": [pg_weekday(d) for d in days],
+                        "other_doctors_that_day": others,  # pass one of these as `doctor` if the caller agrees
                         "note": "Say this doctor doesn't sit that day, name the days they do, and offer one of "
                                 "those days or another doctor who does this service on the asked day."}
             rows = await db.available_slots(day, service_code, None)
+            if only_doctor:
+                rows = [r for r in rows if str(r["doctor_id"]) == self.doctor_ids.get(only_doctor)]
             dow = (day.weekday() + 1) % 7  # Python Mon=0 -> Postgres Sun=0
             doers = [d for d in self.doctors if service_code in d["services"]]
             if not rows and not doctor and doers and not any(dow in self.doctor_days.get(d["code"], []) for d in doers):
@@ -451,9 +462,14 @@ class Receptionist(Agent):
         self._ack("find")
         async def go() -> dict:
             appts = await db.find_appointments(phone)
+            code_of = {v: k for k, v in self.doctor_ids.items()}
             for a in appts:
                 a["say"] = say_datetime(datetime.fromisoformat(a["starts_at"]).astimezone(DHAKA))
-            return {"ok": True, "appointments": appts}
+                a["doctor"] = code_of.get(str(a["doctor_id"]))
+                self.found[str(a["appointment_id"])] = a
+            return {"ok": True, "appointments": appts,
+                    "note": "Tell the caller each one's day, time, doctor_name_bn and service_name_bn, so a wrong "
+                            "doctor or day is caught now. To move one, check_availability for THAT doctor."}
         return await self._run("find_appointments", {"phone": phone}, go())
 
     @function_tool()
@@ -462,18 +478,35 @@ class Receptionist(Agent):
         context: RunContext,
         appointment_id: str,
         phone: str,
-        new_starts_at: Annotated[str, Field(description="starts_at from check_availability for the SAME doctor and service")],
+        new_starts_at: Annotated[str, Field(description="starts_at exactly as returned by check_availability")],
+        new_doctor: Annotated[DoctorCode | None, Field(description="ONLY if the caller agreed to a different doctor: the doctor code of that slot")] = None,
     ) -> dict:
-        """Move an existing appointment to a new time. Confirm with the caller first."""
+        """Move an existing appointment to a new time (and, if the caller agreed, a new doctor). Confirm first."""
         self._ack("book")
         async def go() -> dict:
-            r = await db.reschedule(appointment_id, phone, datetime.fromisoformat(new_starts_at), self.state.call_id)
+            new_start = datetime.fromisoformat(new_starts_at)
+            appt = self.found.get(appointment_id)
+            if new_doctor and appt and self.doctor_ids.get(new_doctor) != str(appt["doctor_id"]):
+                # Another doctor: book the new slot first (nothing lost if it fails), then cancel the old one.
+                r = await db.book(self.state.call_id, appt["patient_name_bn"], appt["patient_name_en"], phone,
+                                  appt["service_code"], self.doctor_ids[new_doctor], new_start, None)
+                if r.get("ok"):
+                    await db.cancel(appointment_id, phone, self.state.call_id, f"moved to {new_doctor}")
+            else:
+                r = await db.reschedule(appointment_id, phone, new_start, self.state.call_id)
             if r.get("ok"):
                 self.state.outcome = "rescheduled"
-                r["say"] = say_datetime(datetime.fromisoformat(new_starts_at).astimezone(DHAKA))
+                self.failed_moves = 0
+                r["say"] = say_datetime(new_start.astimezone(DHAKA))
+            else:
+                self.failed_moves += 1
+                r["note"] = ("Do not try other times blindly. Call check_availability again for this appointment's "
+                             "doctor and offer only what it returns."
+                             if self.failed_moves < 2 else
+                             "Moving failed twice: apologise once and offer a staff callback (request_callback).")
             return r
         return await self._run("reschedule_appointment", {"appointment_id": appointment_id, "phone": phone,
-                                                          "new_starts_at": new_starts_at}, go())
+                                                          "new_starts_at": new_starts_at, "new_doctor": new_doctor}, go())
 
     @function_tool()
     async def cancel_appointment(
