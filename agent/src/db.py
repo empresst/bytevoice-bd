@@ -110,6 +110,45 @@ async def reschedule(appointment_id: str, phone: str, new_start: datetime, call_
     ))
 
 
+async def diagnose_slot(doctor_id: str, service_code: str, start: datetime,
+                        ignore_appt: str | None = None) -> dict[str, Any]:
+    """Why a doctor can't take `start` for a service: the same rules as available_slots(),
+    checked one by one, so the agent can tell the caller the real reason. Read-only."""
+    p = await pool()
+    r = await p.fetchrow(
+        """with c as (select timezone from clinics where id = $1),
+                svc as (select id, duration_min from services where clinic_id = $1 and code = $3 and active),
+                loc as (select ($4::timestamptz at time zone (select timezone from c)) as t)
+           select
+             exists (select 1 from doctor_services ds join svc on ds.service_id = svc.id where ds.doctor_id = $2) as offers,
+             (select array_agg(distinct weekday order by weekday) from doctor_schedules where doctor_id = $2) as days,
+             (select row(start_time, end_time, slot_minutes) from doctor_schedules
+                where doctor_id = $2 and weekday = extract(dow from (select t from loc))::int limit 1) is not null as sits,
+             exists (select 1 from doctor_schedules sc, loc, svc
+                where sc.doctor_id = $2 and sc.weekday = extract(dow from loc.t)::int
+                  and loc.t::time >= sc.start_time
+                  and loc.t::time + make_interval(mins => svc.duration_min) <= sc.end_time) as in_hours,
+             (select min(start_time)::text || '-' || max(end_time)::text from doctor_schedules
+                where doctor_id = $2 and weekday = extract(dow from (select t from loc))::int) as hours,
+             $4::timestamptz <= now() + interval '30 minutes' as too_soon,
+             exists (select 1 from appointments a, svc
+                where a.doctor_id = $2 and a.status = 'scheduled' and ($5::uuid is null or a.id <> $5::uuid)
+                  and tstzrange(a.starts_at, a.ends_at) && tstzrange($4::timestamptz, $4::timestamptz + make_interval(mins => svc.duration_min))) as taken""",
+        CLINIC_ID, doctor_id, service_code, start, ignore_appt,
+    )
+    if not r["offers"]:
+        return {"reason": "doctor_does_not_offer_service"}
+    if not r["sits"]:
+        return {"reason": "doctor_not_in_that_day", "doctor_weekdays_pg": list(r["days"] or [])}
+    if r["too_soon"]:
+        return {"reason": "too_soon"}
+    if not r["in_hours"]:
+        return {"reason": "outside_chamber_hours", "hours": r["hours"]}
+    if r["taken"]:
+        return {"reason": "already_booked"}
+    return {"reason": "not_a_slot_start"}
+
+
 async def cancel(appointment_id: str, phone: str, call_id: str, reason: str | None) -> dict[str, Any]:
     p = await pool()
     return _json(await p.fetchval(

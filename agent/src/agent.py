@@ -500,7 +500,14 @@ class Receptionist(Agent):
                 r["say"] = say_datetime(new_start.astimezone(DHAKA))
             else:
                 self.failed_moves += 1
-                r["note"] = ("Do not try other times blindly. Call check_availability again for this appointment's "
+                if appt:  # the database only says "unavailable": find the real reason, so nothing is made up
+                    target = self.doctor_ids.get(new_doctor) if new_doctor else str(appt["doctor_id"])
+                    why = await db.diagnose_slot(target, appt["service_code"], new_start, appointment_id)
+                    if "doctor_weekdays_pg" in why:
+                        why["doctor_days"] = [pg_weekday(d) for d in why.pop("doctor_weekdays_pg")]
+                    r.update(why)
+                r["note"] = ("Tell the caller this exact reason (never say someone else just booked it unless reason is "
+                             "already_booked). Do not try other times blindly. Call check_availability again for this appointment's "
                              "doctor and offer only what it returns."
                              if self.failed_moves < 2 else
                              "Moving failed twice: apologise once and offer a staff callback (request_callback).")
